@@ -1,6 +1,6 @@
 ---
 layout:     post
-title:      "新人培养"
+title:      "新人成长"
 subtitle:   "送给刚入职场的年轻人"
 date:       2018-03-19 23:30:00
 author:     "邹盛富"
