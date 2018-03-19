@@ -4,7 +4,7 @@ title:      "新人培养"
 subtitle:   "送给刚入职场的年轻人"
 date:       2018-03-19 23:30:00
 author:     "邹盛富"
-header-img: "img/time.jpeg"
+header-img: "img/timg.jpeg"
 tags:
     - 工作
 ---
