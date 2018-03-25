@@ -41,7 +41,7 @@ the dog likes the cat
 查找包含字符串”Har“后面跟两个任意字符，再跟一个字母”y“的行|grep 'Har..y' data
 查找包含字符串”Har“后面跟A或者a的字符串的行|grep 'H[aA]' data
 使用预定义字符类查找包含包含大写字母后跟小写字母的所有行|grep '[[:upper:]][[:lower:]]' data
-使用范围查找包含字符串”3-9“字符串中任意一个的所有行|grep '[3-9]' d
+使用范围查找包含字符串”3-9“字符串中任意一个的所有行|grep '[3-9]' date
 查找包含字符串”X“，同时后面不跟有“a”和“o”的所有行|grep ‘X[^ao]’ data
 使用范围和预定义字符类查找一行中某一个字符是非字母字符的行|grep ‘[^A-Za-z]’ data 或者 grep '[^[:alpha:]]' data
 查找包含大写字母的“H”后面包含跟0个或者多个小写字母的行|grep 'H[[:lower:]]*' data
@@ -58,7 +58,7 @@ the dog likes the cat
 ？| 表示匹配前面的字符1次或者0次出现
 {n}|正好匹配n次
 {n，}|至少匹配n次
-{，m}|最多匹配m次（在一些程序中无法使用）
+{,m}|最多匹配m次（在一些程序中无法使用）
 {n,m}|至少匹配n次，最多匹配m次
 
 
@@ -71,6 +71,6 @@ the dog likes the cat
 
 * 查找cat dog bird hamster中包含上述任意单词的一行
 
-  grep '\<(cat|dog|bird|hamster)\>' data 
+  grep '\<(cat|dog|bird|hamster)\>' data
 
 如果希望查找真是的*,.或者|，可以使用\引用这些字符。
