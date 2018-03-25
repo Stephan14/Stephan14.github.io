@@ -73,4 +73,4 @@ the dog likes the cat
 
   grep '\<(cat|dog|bird|hamster)\>' data
 
-如果希望查找真是的*,.或者|，可以使用\引用这些字符。
+如果希望查找真是的*,.或者\|，可以使用\引用这些字符。
