@@ -40,7 +40,7 @@ int main(int argc, char const *argv[]) {
 
 ```
 
-#### 参考连接
+### 参考连接
 
 [C数组与指针](https://blog.csdn.net/loveyou426/article/details/7901177)
 
