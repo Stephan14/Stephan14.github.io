@@ -71,6 +71,6 @@ the dog likes the cat
 
 * 查找cat dog bird hamster中包含上述任意单词的一行
 
-  grep '\<(cat|dog|bird|hamster)\>' data
+  grep '\<(cat\|dog\|bird\|hamster)\>' data
 
 如果希望查找真是的*,.或者\|，可以使用\引用这些字符。
