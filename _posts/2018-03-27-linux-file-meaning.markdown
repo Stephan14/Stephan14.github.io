@@ -1,6 +1,6 @@
 ---
 layout:     post
-title:      "linux下各文件夹含义"
+title:      "Linux下各文件夹含义"
 subtitle:   "Linux基础"
 date:       2018-03-27 01:34:00
 author:     "邹盛富"
