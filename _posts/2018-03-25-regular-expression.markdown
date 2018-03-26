@@ -39,7 +39,7 @@ the dog likes the cat
 查找包含字符串“Har”的行，并且“Har”出现在单词的结尾|grep 'Har\>' data
 查找包含字符串“Harley”的行，并且“Harley”为单词|grep '\<Harley\>' data
 查找包含字符串”Har“后面跟两个任意字符，再跟一个字母”y“的行|grep 'Har..y' data
-查找包含字符串”Har“后面跟A或者a的字符串的行|grep 'H[aA]' data
+查找包含字符串”H“后面跟A或者a的字符串的行|grep 'H[aA]' data
 使用预定义字符类查找包含包含大写字母后跟小写字母的所有行|grep '[[:upper:]][[:lower:]]' data
 使用范围查找包含字符串”3-9“字符串中任意一个的所有行|grep '[3-9]' date
 查找包含字符串”X“，同时后面不跟有“a”和“o”的所有行|grep ‘X[^ao]’ data
