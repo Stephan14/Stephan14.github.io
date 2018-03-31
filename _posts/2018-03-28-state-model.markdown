@@ -14,7 +14,7 @@ tags:
 
 ### 结构图
 
-![结构图](https://github.com/Stephan14/Stephan14.github.io/blob/master/img/struct.png)
+![结构图]("img/struct.png")
 
 ### 使用场景
 - 对象收到其他对象的请求时，根据自身的不同状态做出不同的反应
