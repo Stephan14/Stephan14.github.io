@@ -1,0 +1,54 @@
+---
+layout:     post
+title:      "libevent源码分析"
+subtitle:   "定时器实现"
+date:       2018-04-06 22:00:00
+author:     "邹盛富"
+header-img: "img/timer.jpeg"
+tags:
+    - C/C++
+    - libevent
+---
+
+### 背景
+libevent已经被广泛的应用，作为底层的网络库，比如 memcached、Vomit、Nylon、Netchat等等，一直都想研究一下libevent的代码，最近有时间就尝试基于2.0.22版本的libevent实现一个定时器，之所以要实现一个定时器，是因为定时器作为一种基础组件在在大多数的函数库中都存在，并且有多种不同的方式来实现。
+
+### 定时器实现
+其实实现一个定时器让其定时的执行某一个函数还是比较简单的，源代码如下：
+```
+#include <fcntl.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+
+#include <event2/event.h>
+#include <event2/event_struct.h>
+#include <event2/util.h>
+
+struct event ev;
+struct timeval tv;
+
+void time_cb(int fd, short event, void *argc)
+{
+	 printf("timer wakeup\n");
+	 event_add(&ev, &tv); // reschedule timer
+}
+
+int main() {
+    struct event_base *base = event_base_new();
+    tv.tv_sec = 10; // 10s period
+    tv.tv_usec = 0;
+    event_assign(&ev, base, -1, 0, time_cb, NULL);
+    event_add(&ev, &tv);
+    event_base_dispatch(base);
+}
+
+```
+上述的代码中主要使用了`event_base_new`、`event_assign`、`event_add`和`event_base_dispatch`四个函数。依靠这四个函数，可以每隔10秒钟执行一次`time_cb`函数
+
+### 定时器流程
+
+#### event_base_new()函数
+
+`event_base_new()`函数的实现如下：
