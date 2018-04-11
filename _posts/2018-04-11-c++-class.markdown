@@ -1,0 +1,71 @@
+---
+layout:     post
+title:      "C++继承"
+subtitle:   "根据基类指针判断指针指向的子类"
+date:       2018-04-11 21:21 :00
+author:     "邹盛富"
+header-img: "img/class.png"
+tags:
+    - C/C++
+---
+
+### 背景
+近期突然自己想到了一个问题：如果我现在有一个基类，它有很多个子类。同时现在又有一个基类指针，它指向一个子类，但是我不知道其具体是哪一个子类，所以如果我想知道它实际指向哪个子类在java中可以有instanceof可以实现，而在C++中怎么实现呢？
+
+### 解决方案
+后来我想了一段时间，终于想明白了，在C++中如果想在运行而不是在编译的过程中获得对象的具体的类型，那么就必须要用到虚函数。其实虚函数的出现就可以理解为需要在运行的时候知道对象的具体类型，反之亦然。既然用到了虚函数，那么就可以实用`dynamic_cast<>()`函数来判断指针或者引用的具体类类型了，于是我以下面的代码作为例子，其类的关系如图：
+![](http://res.cloudinary.com/bytedance14/image/upload/v1523453483/blog/class.png)
+代码如下：
+```
+#include <iostream>  
+using namespace std;  
+
+class A  
+{  
+public:  
+    A(){}  
+    virtual ~A(){}  
+
+};  
+
+class B:public A  
+{  
+public:  
+
+    B(){}  
+    ~B(){}  
+
+};  
+
+class C:public A  
+{  
+public:  
+    C(){}  
+    ~C(){}  
+
+};  
+
+class D:public A  
+{  
+public:  
+    D(){}  
+    ~D(){}  
+};  
+
+int main(int argc, const char * argv[]) {  
+    A* pa = new D();  
+    if((dynamic_cast< B* >( pa )) != nullptr){  
+        cout<<"此类为B"<<endl;  
+    }else if((dynamic_cast<C*>(pa)) != nullptr){  
+        cout<<"此类为C"<<endl;  
+    }else if((dynamic_cast<D*>(pa)) != nullptr){  
+        cout<<"此类为D"<<endl;  
+    }  
+    delete pa;  
+    return 0;  
+}
+```
+#### 注意
+把基类的析构函数设为虚函数
+
+接着我又想，如果我不是使用虚函数，那么就不能使用`dynamic_cast<>()`函数来判断了，因为使用dynamic_cast<>()函数中的指针或者引用对应的类中至少要含有一个虚函数。经过我查阅网上的资料，发现如果你允许类有虚函数的话，可以通过在基类中添加虚函数类实现判断指针所指向的真正子类；如果类中不允许出现虚函数，那么你只能在每个类中实现类似于getType()的函数，让它返回能表示所有类类型的枚举类型,这里有一个[Stack Overflow](https://stackoverflow.com/questions/500493/c-equivalent-of-instanceof)上的回答,当然，一般不会出现后者的情况，我还是建议再用前者的方法，最简单的方式就是将析构函数设置成虚函数。
