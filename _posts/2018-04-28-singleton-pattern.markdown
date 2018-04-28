@@ -4,7 +4,7 @@ title:      "单例模式"
 subtitle:   "三种单例模式的C++实现"
 date:       2018-04-18 09:09:00
 author:     "邹盛富"
-header-img: "img/singleton.png"
+header-img: "img/singleton.jpeg"
 tags:
     - 设计模式
 ---
