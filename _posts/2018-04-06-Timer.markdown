@@ -164,164 +164,167 @@ event_add(struct event *ev, const struct timeval *tv)
 ```
 其中主要的工作都由`event_add_internal()`这个函数执行，下面看看这个函数的详细情况：
 ```
-static inline int
+    static inline int
 event_add_internal(struct event *ev, const struct timeval *tv,
-    int tv_is_absolute)
+        int tv_is_absolute)
 {
-	struct event_base *base = ev->ev_base;
-	int res = 0;
-	int notify = 0;
+    struct event_base *base = ev->ev_base;
+    int res = 0;
+    int notify = 0;
 
-	EVENT_BASE_ASSERT_LOCKED(base);
-	_event_debug_assert_is_setup(ev);
+    EVENT_BASE_ASSERT_LOCKED(base);
+    _event_debug_assert_is_setup(ev);
 
-	event_debug((
-		 "event_add: event: %p (fd "EV_SOCK_FMT"), %s%s%scall %p",
-		 ev,
-		 EV_SOCK_ARG(ev->ev_fd),
-		 ev->ev_events & EV_READ ? "EV_READ " : " ",
-		 ev->ev_events & EV_WRITE ? "EV_WRITE " : " ",
-		 tv ? "EV_TIMEOUT " : " ",
-		 ev->ev_callback));
+    event_debug((
+                "event_add: event: %p (fd "EV_SOCK_FMT"), %s%s%scall %p",
+                ev,
+                EV_SOCK_ARG(ev->ev_fd),
+                ev->ev_events & EV_READ ? "EV_READ " : " ",
+                ev->ev_events & EV_WRITE ? "EV_WRITE " : " ",
+                tv ? "EV_TIMEOUT " : " ",
+                ev->ev_callback));
 
-	EVUTIL_ASSERT(!(ev->ev_flags & ~EVLIST_ALL));
+    EVUTIL_ASSERT(!(ev->ev_flags & ~EVLIST_ALL));
 
-	/*
-	 * prepare for timeout insertion further below, if we get a
-	 * failure on any step, we should not change any state.
-	 */
-	if (tv != NULL && !(ev->ev_flags & EVLIST_TIMEOUT)) {
-		if (min_heap_reserve(&base->timeheap,
-			1 + min_heap_size(&base->timeheap)) == -1)
-			return (-1);  /* ENOMEM == errno */
-	}
+    /*
+     * prepare for timeout insertion further below, if we get a
+     * failure on any step, we should not change any state.
+     */
+    if (tv != NULL && !(ev->ev_flags & EVLIST_TIMEOUT)) {
+        if (min_heap_reserve(&base->timeheap,
+                    1 + min_heap_size(&base->timeheap)) == -1)
+            return (-1);  /* ENOMEM == errno */
+    }
 
 #ifndef _EVENT_DISABLE_THREAD_SUPPORT
     // 如果当前调用者不是主线程（主线程就是执行事件循环的线程），而且被添加的事件处理器是信号事件处理器，而且  
     // 主线程正在执行该信号事件处理器的回调函数，则当前调用者必须等待主线程完成调用，否则会引起竞争
-	if (base->current_event == ev && (ev->ev_events & EV_SIGNAL)
-	    && !EVBASE_IN_THREAD(base)) {
-		++base->current_event_waiters;
-		EVTHREAD_COND_WAIT(base->current_event_cond, base->th_base_lock);
-	}
+    if (base->current_event == ev && (ev->ev_events & EV_SIGNAL)
+            && !EVBASE_IN_THREAD(base)) {
+        ++base->current_event_waiters;
+        EVTHREAD_COND_WAIT(base->current_event_cond, base->th_base_lock);
+    }
 #endif
 
-	if ((ev->ev_events & (EV_READ|EV_WRITE|EV_SIGNAL)) &&
-	    !(ev->ev_flags & (EVLIST_INSERTED|EVLIST_ACTIVE))) {
-		if (ev->ev_events & (EV_READ|EV_WRITE)) {
-			res = evmap_io_add(base, ev->ev_fd, ev);
-		}
-		else if (ev->ev_events & EV_SIGNAL) {
-			res = evmap_signal_add(base, (int)ev->ev_fd, ev);
-		}
-		if (res != -1) {
-            // 将事件处理器插入注册事件队列
-			event_queue_insert(base, ev, EVLIST_INSERTED);
-		}
-		if (res == 1) {
-            // 事件多路分发器中添加了新的事件，所以要通知主线程
-			notify = 1;
-			res = 0;
-		}
-	}
+    if ((ev->ev_events & (EV_READ|EV_WRITE|EV_SIGNAL)) &&
+            !(ev->ev_flags & (EVLIST_INSERTED|EVLIST_ACTIVE))) {
+        if (ev->ev_events & (EV_READ|EV_WRITE)) {
+            res = evmap_io_add(base, ev->ev_fd, ev);
+        }
+        else if (ev->ev_events & EV_SIGNAL) {
+            res = evmap_signal_add(base, (int)ev->ev_fd, ev);
+        }
+        if (res != -1) {
+            //将事件处理器插入注册事件队列
+            event_queue_insert(base, ev, EVLIST_INSERTED);
+        }
+        if (res == 1) {
+            //事件多路分发器中添加了新的事件，所以要通知主线程
+            notify = 1;
+            res = 0;
+        }
+    }
 
-    // 下面将事件处理器添加到通用的定时器队列或时间堆中，对于信号事件处理器和io事件处理器，根据  
-    // evmap_*_add函数的结果决定是否添加（这是为了给事件设置超时）；  
-    // 而对于定时器，则始终应该添加之
-	if (res != -1 && tv != NULL) {
-		printf("res != -1 && tv != NULL\n");
-		struct timeval now;
-		int common_timeout;
+    /* 下面将事件处理器添加到通用的定时器队列或时间堆中，对于信号事件处理器和io事件处理器，根据
+     * evmap_*_add函数的结果决定是否添加（这是为了给事件设置超时）;
+     * 而对于定时器，则始终应该添加之
+     */
+    if (res != -1 && tv != NULL) {
+        printf("res != -1 && tv != NULL\n");
+        struct timeval now;
+        int common_timeout;
 
-		/*
-		 * for persistent timeout events, we remember the
-		 * timeout value and re-add the event.
-		 *
-		 * If tv_is_absolute, this was already set.
-		 */
-        // 对于永久性事件处理器，如果其超时时间不是绝对时间，则将该事件处理器的超时时间记录在变量ev->ev_io_timeout中
-		if (ev->ev_closure == EV_CLOSURE_PERSIST && !tv_is_absolute)
-			ev->ev_io_timeout = *tv;
+        /*
+         * for persistent timeout events, we remember the
+         * timeout value and re-add the event.
+         *
+         * If tv_is_absolute, this was already set.
+         */
+        /* 对于永久性事件处理器，如果其超时时间不是绝对时间，
+         * 则将该事件处理器的超时时间记录在变量ev->ev_io_timeout中
+         */
+        if (ev->ev_closure == EV_CLOSURE_PERSIST && !tv_is_absolute)
+            ev->ev_io_timeout = *tv;
 
-		/*
-		 * we already reserved memory above for the case where we
-		 * are not replacing an existing timeout.
-		 */
-        // 如果该事件处理器已经被插入到通用的定时器队列或者时间堆中，则先删除它
-		if (ev->ev_flags & EVLIST_TIMEOUT) {
-			/* XXX I believe this is needless. */
-			if (min_heap_elt_is_top(ev))
-				notify = 1;
-			event_queue_remove(base, ev, EVLIST_TIMEOUT);
-		}
+        /*
+         * we already reserved memory above for the case where we
+         * are not replacing an existing timeout.
+         */
+        /* 如果该事件处理器已经被插入到通用的定时器队列或者时间堆中，则先删除它 */
+        if (ev->ev_flags & EVLIST_TIMEOUT) {
+            /* XXX I believe this is needless. */
+            if (min_heap_elt_is_top(ev))
+                notify = 1;
+            event_queue_remove(base, ev, EVLIST_TIMEOUT);
+        }
 
-		/* Check if it is active due to a timeout.  Rescheduling
-		 * this timeout before the callback can be executed
-		 * removes it from the active list. */
+        /* Check if it is active due to a timeout.  Rescheduling
+         * this timeout before the callback can be executed
+         * removes it from the active list. */
         /*
          * 如果待添加的事件处理器已经被激活，且原因是超时，则从活动事件队列中删除它
          * 以避免回调函数被执行。对于信号事件处理器，必须要将其ncalls成员设置为0
          * 这样可以干净的终止信号事件的处理
          */
-		if ((ev->ev_flags & EVLIST_ACTIVE) &&
-		    (ev->ev_res & EV_TIMEOUT)) {
-			if (ev->ev_events & EV_SIGNAL) {
-				/* See if we are just active executing
-				 * this event in a loop
-				 */
-				if (ev->ev_ncalls && ev->ev_pncalls) {
-					/* Abort loop */
-					*ev->ev_pncalls = 0;
-				}
-			}
-			event_queue_remove(base, ev, EVLIST_ACTIVE);
-		}
+        if ((ev->ev_flags & EVLIST_ACTIVE) &&
+                (ev->ev_res & EV_TIMEOUT)) {
+            if (ev->ev_events & EV_SIGNAL) {
+                /* See if we are just active executing
+                 * this event in a loop
+                 */
+                if (ev->ev_ncalls && ev->ev_pncalls) {
+                    /* Abort loop */
+                    *ev->ev_pncalls = 0;
+                }
+            }
+            event_queue_remove(base, ev, EVLIST_ACTIVE);
+        }
 
-		gettime(base, &now);
+        gettime(base, &now);
 
-		common_timeout = is_common_timeout(tv, base);
-		if (tv_is_absolute) {
-			ev->ev_timeout = *tv;
-		} else if (common_timeout) {
-			struct timeval tmp = *tv;
-			tmp.tv_usec &= MICROSECONDS_MASK;
-			evutil_timeradd(&now, &tmp, &ev->ev_timeout);
-			ev->ev_timeout.tv_usec |=
-			    (tv->tv_usec & ~MICROSECONDS_MASK);
-		} else {
-			evutil_timeradd(&now, tv, &ev->ev_timeout);
-		}
+        common_timeout = is_common_timeout(tv, base);
+        if (tv_is_absolute) {
+            ev->ev_timeout = *tv;
+        } else if (common_timeout) {
+            struct timeval tmp = *tv;
+            tmp.tv_usec &= MICROSECONDS_MASK;
+            evutil_timeradd(&now, &tmp, &ev->ev_timeout);
+            ev->ev_timeout.tv_usec |=
+                (tv->tv_usec & ~MICROSECONDS_MASK);
+        } else {
+            evutil_timeradd(&now, tv, &ev->ev_timeout);
+        }
 
-		event_debug((
-			 "event_add: timeout in %d seconds, call %p\n",
-			 (int)tv->tv_sec, ev->ev_callback));
+        event_debug((
+                    "event_add: timeout in %d seconds, call %p\n",
+                    (int)tv->tv_sec, ev->ev_callback));
 
-		event_queue_insert(base, ev, EVLIST_TIMEOUT);
-		if (common_timeout) {
-			struct common_timeout_list *ctl =
-			    get_common_timeout_list(base, &ev->ev_timeout);
-			if (ev == TAILQ_FIRST(&ctl->events)) {
-				common_timeout_schedule(ctl, &now, ev);
-			}
-		} else {
-			/* See if the earliest timeout is now earlier than it
-			 * was before: if so, we will need to tell the main
-			 * thread to wake up earlier than it would
-			 * otherwise. */
-			if (min_heap_elt_is_top(ev)) {
-				notify = 1;
-			}
-		}
-	}
+        event_queue_insert(base, ev, EVLIST_TIMEOUT);
+        if (common_timeout) {
+            struct common_timeout_list *ctl =
+                get_common_timeout_list(base, &ev->ev_timeout);
+            if (ev == TAILQ_FIRST(&ctl->events)) {
+                common_timeout_schedule(ctl, &now, ev);
+            }
+        } else {
+            /* See if the earliest timeout is now earlier than it
+             * was before: if so, we will need to tell the main
+             * thread to wake up earlier than it would
+             * otherwise. */
+            if (min_heap_elt_is_top(ev)) {
+                notify = 1;
+            }
+        }
+    }
 
-	/* if we are not in the right thread, we need to wake up the loop */
-	if (res != -1 && notify && EVBASE_NEED_NOTIFY(base)) {
-		evthread_notify_base(base);
-	}
+    /* if we are not in the right thread, we need to wake up the loop */
+    if (res != -1 && notify && EVBASE_NEED_NOTIFY(base)) {
+        evthread_notify_base(base);
+    }
 
-	_event_debug_note_add(ev);
+    _event_debug_note_add(ev);
 
-	return (res);
+    return (res);
 }
 ```
 
@@ -408,9 +411,9 @@ event_base_loop(struct event_base *base, int flags)
 
 	done = 0;
 
-#ifndef _EVENT_DISABLE_THREAD_SUPPORT
-	base->th_owner_id = EVTHREAD_GET_ID();
-#endif
+    #ifndef _EVENT_DISABLE_THREAD_SUPPORT
+	   base->th_owner_id = EVTHREAD_GET_ID();
+    #endif
 
 	base->event_gotterm = base->event_break = 0;
 
