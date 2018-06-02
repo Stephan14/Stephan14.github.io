@@ -2,7 +2,7 @@
 layout:     post
 title:      "go语言interface"
 subtitle:   "interface使用介绍"
-date:       2018-05-13 00:16:00
+date:       2018-06-02 00:16:00
 author:     "飞雪无情"
 header-img: "img/1525971154898.jpg"
 tags:
