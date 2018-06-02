@@ -164,7 +164,7 @@ event_add(struct event *ev, const struct timeval *tv)
 ```
 其中主要的工作都由`event_add_internal()`这个函数执行，下面看看这个函数的详细情况：
 ```
-    static inline int
+static inline int
 event_add_internal(struct event *ev, const struct timeval *tv,
         int tv_is_absolute)
 {
@@ -197,8 +197,10 @@ event_add_internal(struct event *ev, const struct timeval *tv,
     }
 
 #ifndef _EVENT_DISABLE_THREAD_SUPPORT
-    // 如果当前调用者不是主线程（主线程就是执行事件循环的线程），而且被添加的事件处理器是信号事件处理器，而且  
-    // 主线程正在执行该信号事件处理器的回调函数，则当前调用者必须等待主线程完成调用，否则会引起竞争
+    /* 如果当前调用者不是主线程（主线程就是执行事件循环的线程），而且被添加的事件处理器是信号事
+     * 件处理器，而且主线程正在执行该信号事件处理器的回调函数，则当前调用者必须等待主线程完成调
+     * 用，否则会引起竞争
+     */
     if (base->current_event == ev && (ev->ev_events & EV_SIGNAL)
             && !EVBASE_IN_THREAD(base)) {
         ++base->current_event_waiters;
@@ -226,8 +228,8 @@ event_add_internal(struct event *ev, const struct timeval *tv,
     }
 
     /* 下面将事件处理器添加到通用的定时器队列或时间堆中，对于信号事件处理器和io事件处理器，根据
-     * evmap_*_add函数的结果决定是否添加（这是为了给事件设置超时）;
-     * 而对于定时器，则始终应该添加之
+     * evmap_*_add函数的结果决定是否添加（这是为了给事件设置超时）；而对于定时器，则始终应该添
+     * 加之
      */
     if (res != -1 && tv != NULL) {
         printf("res != -1 && tv != NULL\n");
