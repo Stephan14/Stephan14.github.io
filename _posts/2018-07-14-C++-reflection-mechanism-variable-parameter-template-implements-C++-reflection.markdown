@@ -173,7 +173,7 @@ class ActorFactory
     private:
     ActorFactory(){};
     static ActorFactory<Targs...>* m_pActorFactory;
-    std::unordered_map<std::string, std::function<Actor*(Targs&&...)> > m_mapCreateFunction;
+            std::unordered_map<std::string, std::function<Actor*(Targs&&...)> > m_mapCreateFunction;
 };
 
 template<typename ...Targs>
