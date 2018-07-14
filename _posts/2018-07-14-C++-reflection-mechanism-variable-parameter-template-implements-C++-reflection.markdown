@@ -29,24 +29,24 @@ CmdHello.hpp:
 ```
 #ifdef __cplusplus
 extern "C" {
-#endif
-// @brief 创建函数声明
-// @note 插件代码编译成so后存放到plugin目录，框架加载动态库后调用create()创建插件类实例。
-neb::Cmd* create();
-#ifdef __cplusplus
+    #endif
+    // @brief 创建函数声明
+    // @note 插件代码编译成so后存放到plugin目录，框架加载动态库后调用create()创建插件类实例。
+    neb::Cmd* create();
+    #ifdef __cplusplus
 }
 #endif
 
 namespace im
 {
 
-class CmdHello: public neb::Cmd
-{
-public:
-    CmdHello();
-    virtual ~CmdHello();
-    virtual bool AnyMessage();
-};
+    class CmdHello: public neb::Cmd
+    {
+        public:
+        CmdHello();
+        virtual ~CmdHello();
+        virtual bool AnyMessage();
+    };
 
 } /* namespace im */
 ```
@@ -58,11 +58,11 @@ CmdHello.cpp:
 #ifdef __cplusplus
 extern "C" {
 #endif
-neb::Cmd* create()
-{
-    neb::Cmd* pCmd = new im::CmdHello();
-    return(pCmd);
-}
+    neb::Cmd* create()
+    {
+        neb::Cmd* pCmd = new im::CmdHello();
+        return(pCmd);
+    }
 #ifdef __cplusplus
 }
 #endif
@@ -70,19 +70,19 @@ neb::Cmd* create()
 namespace im
 {
 
-CmdHello::CmdHello()
-{
-}
+    CmdHello::CmdHello()
+    {
+    }
 
-CmdHello::~CmdHello()
-{
-}
+    CmdHello::~CmdHello()
+    {
+    }
 
-bool CmdHello::AnyMessage()
-{
-    std::cout << "CmdHello" << std::endl;
-    return(true);
-}
+    bool CmdHello::AnyMessage()
+    {
+        std::cout << "CmdHello" << std::endl;
+        return(true);
+    }
 
 }
 ```
@@ -152,7 +152,7 @@ Actor创建工厂(注意看代码注释):
 template<typename ...Targs>
 class ActorFactory
 {
-public:
+    public:
     static ActorFactory* Instance()
     {
         if (nullptr == m_pActorFactory)
@@ -170,7 +170,7 @@ public:
     // 传入“类名”和参数创建类实例，方法内部通过“类名”从m_mapCreateFunction获得了对应的“实例创建方法（DynamicCreator的CreateObject方法）”完成实例创建操作。
     Actor* Create(const std::string& strTypeName, Targs&&... args);
 
-private:
+    private:
     ActorFactory(){};
     static ActorFactory<Targs...>* m_pActorFactory;
     std::unordered_map<std::string, std::function<Actor*(Targs&&...)> > m_mapCreateFunction;
@@ -186,8 +186,8 @@ bool ActorFactory<Targs...>::Regist(const std::string& strTypeName, std::functio
     {
         return (false);
     }
-    bool bReg = m_mapCreateFunction.insert(
-                    std::make_pair(strTypeName, pFunc)).second;
+
+    bool bReg = m_mapCreateFunction.insert(   std::make_pair(strTypeName, pFunc)).second;
     return (bReg);
 }
 
@@ -198,9 +198,7 @@ Actor* ActorFactory<Targs...>::Create(const std::string& strTypeName, Targs&&...
     if (iter == m_mapCreateFunction.end())
     {
         return (nullptr);
-    }
-    else
-    {
+    } else {
         return (iter->second(std::forward<Targs>(args)...));
     }
 }
