@@ -1,0 +1,140 @@
+---
+layout:     post
+title:      "管程"
+subtitle:   "原理与使用方法"
+date:       2018-08-12 14:36:00
+author:     "邹盛富"
+header-img: "img/girls-591552_1920.jpg"
+tags:
+    - 操作系统
+---
+
+### 背景
+使用信号量中的P、V操作编程的要求比较高，容易出现死锁等问题。从而在程序设计语言中引入管程的成分，降低使用成本，称其为一种高级的同步机制。
+
+### 定义
+
+由共享的资源的数据结构以及其上操作的一组过程组成，进程只能通过调用管程中的过程来间接的访问管程中的数据结构。
+
+### 特点
+- 互斥：只有一个进程调用管程，其他的进程就不可以进入，以保证管程中数据结构的完整性，**通常管程的互斥是由编译器保证的，因为其是语言机制。**
+
+- 同步：设置条件变量，通过条件变量的唤醒、等待操作解决问题，**当一个进程或者线程在条件变量上等待的时候，需要先释放管程的使用权。**
+
+### 问题
+
+场景：当一个进入管程的进程执行等待操作时，它应当释放管程的互斥权，当后面进入管程的进程执行唤醒操作时（例如P唤醒Q），管程中便存在两个同时处于活动状态的进程，这就不满足互斥性了。
+
+解决办法：
+- P等待Q执行（Hoare管程）
+- Q等待P继续执行（MESA管程）
+- 规定唤醒操作作为管程中最后一个可执行操作（Hansen）
+
+### Hoare管程
+
+![](http://res.cloudinary.com/bytedance14/image/upload/v1534059951/blog/20160121193005732.png)
+
+- 因为管程是互斥进入，所以当管程已经被进程占用时，另一个试图进入的进程应该在入口处等待，因此在入口处设置**入口等待队列**。
+- 管程内部可能出现多个等待进程，所以在管程内部需要设置一个进程等待队列称为**紧急等待队列**，其优先级高于入口等待队列。
+
+#### 条件变量的定义
+
+定义条件变量c，则 condition c；
+
+- wait(c)：如果紧急等待队列非空，则唤醒第一个等待者；否则释放管程的互斥权，执行此操作的进程进入c链末尾。
+
+- signal(c)：如果c链为空，则相当于空操作，执行此操作的进程继续执行；否则唤醒入口等待队列的第一个等待者，执行此操作的进程进入紧急等待队列的末尾。
+
+
+#### 用管程解决生产者和消费者
+```
+monitor ProducerConsumer
+	condition full, empty;
+	integer count;
+	procedure insert (item: integer);
+	begin
+		if count == N then wait(full);
+		insert_item(item); count++;
+		if count ==1 then signal(empty);
+	end;
+
+	function remove: integer;
+	begin
+		if count ==0 then wait(empty);
+		remove = remove_item; count--;
+		if count==N-1 then signal(full);
+	end;
+
+	count:=0;
+end monitor;
+```
+
+```
+procedure producer;
+begin
+	while true do
+	begin
+		item = produce_item;
+		ProducerConsumer.insert(item);
+	end
+end;
+
+procedure consumer;
+begin
+	while true do
+	begin
+		item=ProducerConsumer.remove;
+		consume_item(item);
+	end
+
+```
+可以参考Java中`synchronized`实现生产消费模型[java实现生产者消费者问题](https://www.cnblogs.com/happyPawpaw/archive/2013/01/18/2865957.html)。
+
+### MESA管程
+为了弥补Hoare管程的缺点：两次额外的进程切换导致的效率低下，提出了MESA管程，通过将`signal`替换成`notify`避免进程切换。使用`notify`可以是等待在某个条件变量的队列中的头部进程得到一个通知，在将来处理器可用的某个时候可以执行，同时发信号的进程继续执行。**这就可能导致在被通知的进程被调度到CPU上执行之前其他进程可能进入该管程，因此在这个被通知的进程被调度到CPU上执行的时候，必须重新检查条件，此时就可以使用while循环代替if语句（防止虚假唤醒），导致对条件变量至少一次的额外检测并且对等待进程在notify之后何时运行没有限制**
+
+#### notify改进
+- 对每个条件变量关联一个**监视计时器**，不论是否被通知，一个等待时间超时的进程将被设置为就绪态；当进程被调度执行的时候，就绪判断相关条件，如果满足就继续执行。这样就会防止某个进程在产生相关的信号失败之前退出，等待该条件的进程会被无限制的推迟执行而处于饥饿状态。
+
+- 引入broadcast使所有等待在该条件变量上的所有进程都释放并进入就绪队列，当一个进程不知道有多少个进程处于等待状态或者不知道应该激活哪一个进程时那就通知所有进程。
+
+### pthread中同步机制
+
+#### 为什么在调用条件变量之前使用互斥量加锁
+如果没有使用互斥量进行加锁，在某一个时刻根据条件判断进程需要去等待，在进程进入条件变量队列之前就**切换下CPU**时，这个进程实际上没有被加入等待队列，就有可能不能被成功唤醒，详细见[知乎](https://www.zhihu.com/question/24116967)和[简书](https://www.jianshu.com/p/01ad36b91d39)相关文章。
+
+#### pthread_cond_wait()函数
+主要包含以下三部分：
+- 解锁
+- 等待
+- 上锁
+
+因为我们在调用pthread_cond_wait时，如果条件不成立我们就进入阻塞，但是进入阻塞这个期间，如果条件变量改变了的话，那我们就漏掉了这个条件。因为这个线程还没有放到等待队列上，所以调用pthread_cond_wait前要先锁互斥量，pthread_cond_wait在把线程放进阻塞队列后，自动对mutex进行解锁，使得其它线程可以获得加锁的权利。这样其它线程才能对临界资源进行访问并在适当的时候唤醒这个阻塞的进程。当pthread_cond_wait返回的时候又自动给mutex加锁。
+
+### 进程间通信
+
+#### 为什么需要进程间通信
+- 信号量和管程只能传递比较简单的信息，不能传递大量的信息，比如数组
+- 管程不适合多处理器，因为在多处理器情况下，管程只能在确定的CPU上运行，不能在别的CPU上运行，不然会出现管程并行执行，产生错误
+
+#### 类型
+- 消息传递
+![](http://res.cloudinary.com/bytedance14/image/upload/v1534086793/blog/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7_2018-08-12_%E4%B8%8B%E5%8D%8811.12.28.png)
+
+- 共享内存
+![](http://res.cloudinary.com/bytedance14/image/upload/v1534166328/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7_2018-08-13_%E4%B8%8B%E5%8D%889.17.20.png)
+    1. 在物理内存中建立地址空间映射到两个进程的地址空间中
+    2. 通过利用读者写者方法解决两个进程的地址互斥
+
+- 管道
+ 利用传输介质（文件或者内存）连接两个进程
+ 1. 字符流方式写入读出
+ 2. 先进先出
+ 3. 提供协调能力（互斥、同步）
+
+### 参考资料
+[应该如何理解管程](https://www.zhihu.com/question/30641734)
+
+[为什么 pthread 条件变量(condition variable)函数要用到 mutex ？](https://feng-qi.github.io/2017/05/08/Why-do-pthreads-condition-variable-functions-require-a-mutex/)
+
+[Lock, mutex, semaphore… what's the difference?](https://stackoverflow.com/questions/2332765/lock-mutex-semaphore-whats-the-difference?answertab=oldest#tab-top)
