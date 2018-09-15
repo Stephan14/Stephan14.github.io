@@ -19,7 +19,11 @@ collect2: error: ld returned 1 exit status
 Makefile:71: recipe for target 'server_main' failed
 make: *** [server_main] Error 1
 ```
-回头看代码发现头文件`Inotify.h`这个文件在`FileServer.h`中已经被引用，然后再`server_main.cc`文件中又引用了`FileServer.h`这个文件,但是在最后执行`g++ .obj/Server.grpc.pb.o .obj/Server.pb.o .obj/Prepare.o .obj/FileServer.o .obj/Thread.o .obj/Inotify.o .obj/server_main.o -L /usr/local/lib   -std=c++11 `pkg-config --libs protobuf grpc++ grpc` -Wl,--no-as-needed -lgrpc++_reflection -Wl,--as-needed -ldl  util/.obj/File.o  -o server_main`命令进行链接的时候，将所有的目标文件装载到同一环境的时候出现了重复定义的问题，后来尝试将变量`EVENT_NAME`变成static就好了，于是就研究了一下出现这种问题的原因。
+回头看代码发现头文件`Inotify.h`这个文件在`FileServer.h`中已经被引用，然后再`server_main.cc`文件中又引用了`FileServer.h`这个文件,但是在最后执行
+
+    g++ .obj/Server.grpc.pb.o .obj/Server.pb.o .obj/Prepare.o .obj/FileServer.o .obj/Thread.o .obj/Inotify.o .obj/server_main.o -L /usr/local/lib   -std=c++11 `pkg-config --libs protobuf grpc++ grpc` -Wl,--no-as-needed -lgrpc++_reflection -Wl,--as-needed -ldl  util/.obj/File.o  -o server_main
+
+命令进行链接的时候，将所有的目标文件装载到同一环境的时候出现了重复定义的问题，后来尝试将变量`EVENT_NAME`变成static就好了，于是就研究了一下出现这种问题的原因。
 
 ## 编译、链接过程
 - 预处理将伪指令（宏定义、条件编译、和引用头文件）和特殊符号进行处理
@@ -246,3 +250,23 @@ Press ENTER to continue.
 ```
 
 可以看到在global.cpp中定义的var具有全局唯一性，**在每个模块中访问的var地址都相同**，例子的var是常量，不能改变它的值，如果在头文件中声明extern int var并在源文件中定义int var = 10，然后在需要用到var的模块中引入该头文件，就可以实现C语言的全局变量，并且它的值可以被改变。
+
+## 补充
+
+原则：注意声明和定义的区别，避免在头文件中定义变量。
+
+编译单元：一个编译单元就是一个经过预处理的源文件（.c\.cpp）。
+
+内部链接：如果一个名称对于它的编译单元来说是局部的，并且在链接的时候不会与其它编译单元中同样的名称相冲突，则这个名称具有内部链接。
+
+外部链接：如果一个名称在链接时可以和其他编译单元交互，那么这个名称就具有外部链接。
+
+分别编译：每个文件中所用到的名字及其类型，必须在这个文件中进行声明，使该文件的编译工作与整个程序的其他文件无关。
+
+C++规定，有const修饰的变量，不但不可修改，还都将具有内部链接属性，也就是只在本文件可见。这是原来C语言的static修饰字的功能，现在const也有这个功能了。
+
+C++又补充规定，extern const联合修饰时，extern将压制const的内部链接属性。
+
+C++定义全局变量的方法：在.h文件中声明extern int var; 在.cpp文件中定义int var = 10;
+
+[原文链接](https://www.cnblogs.com/edwardcmh/archive/2013/06/09/3129364.html)
