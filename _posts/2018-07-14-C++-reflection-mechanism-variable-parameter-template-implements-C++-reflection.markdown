@@ -6,7 +6,7 @@ date:       2018-07-14 11:53:00
 author:     "铁芒箕"
 header-img: "img/dawn-190055_1280.jpg"
 tags:
-    - C++
+    - C/C++
 ---
 ### 概要
 
