@@ -7,7 +7,6 @@ author:     "邹盛富"
 header-img: "img/reg.png"
 tags:
     - Linux
-    - 正则表达式
 ---
 
 ### 介绍
