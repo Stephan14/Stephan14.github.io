@@ -6,7 +6,7 @@ date:       2018-09-13 21:05:30
 author:     "邹盛富"
 header-img: "img/starry-night-1149815_1920.jpg"
 tags:
-    - C++
+    - C/C++
 ---
 ## 背景
 最近尝试编译C++项目，编译的时候遇到如下报错：
