@@ -217,22 +217,15 @@ event_add_internal(struct event *ev, const struct timeval *tv,
             res = evmap_signal_add(base, (int)ev->ev_fd, ev);
         }
         if (res != -1) {
-            //将事件处理器插入注册事件队列
             event_queue_insert(base, ev, EVLIST_INSERTED);
         }
         if (res == 1) {
-            //事件多路分发器中添加了新的事件，所以要通知主线程
             notify = 1;
             res = 0;
         }
     }
 
-    /* 下面将事件处理器添加到通用的定时器队列或时间堆中，对于信号事件处理器和io事件处理器，根据
-     * evmap_*_add函数的结果决定是否添加（这是为了给事件设置超时）；而对于定时器，则始终应该添
-     * 加之
-     */
     if (res != -1 && tv != NULL) {
-        printf("res != -1 && tv != NULL\n");
         struct timeval now;
         int common_timeout;
 
@@ -242,9 +235,6 @@ event_add_internal(struct event *ev, const struct timeval *tv,
          *
          * If tv_is_absolute, this was already set.
          */
-        /* 对于永久性事件处理器，如果其超时时间不是绝对时间，
-         * 则将该事件处理器的超时时间记录在变量ev->ev_io_timeout中
-         */
         if (ev->ev_closure == EV_CLOSURE_PERSIST && !tv_is_absolute)
             ev->ev_io_timeout = *tv;
 
@@ -252,7 +242,6 @@ event_add_internal(struct event *ev, const struct timeval *tv,
          * we already reserved memory above for the case where we
          * are not replacing an existing timeout.
          */
-        /* 如果该事件处理器已经被插入到通用的定时器队列或者时间堆中，则先删除它 */
         if (ev->ev_flags & EVLIST_TIMEOUT) {
             /* XXX I believe this is needless. */
             if (min_heap_elt_is_top(ev))
@@ -263,11 +252,6 @@ event_add_internal(struct event *ev, const struct timeval *tv,
         /* Check if it is active due to a timeout.  Rescheduling
          * this timeout before the callback can be executed
          * removes it from the active list. */
-        /*
-         * 如果待添加的事件处理器已经被激活，且原因是超时，则从活动事件队列中删除它
-         * 以避免回调函数被执行。对于信号事件处理器，必须要将其ncalls成员设置为0
-         * 这样可以干净的终止信号事件的处理
-         */
         if ((ev->ev_flags & EVLIST_ACTIVE) &&
                 (ev->ev_res & EV_TIMEOUT)) {
             if (ev->ev_events & EV_SIGNAL) {
@@ -330,56 +314,52 @@ event_add_internal(struct event *ev, const struct timeval *tv,
 }
 ```
 
-在上面这个函数可以发现，对于加入其中的任何事件都会提前设置一个超时时间，以防程序执行在某一步出现问题。接下来对读写事件和信号事件，程序分别在`event_base`变量中设置文件描述符或者信号与`event`的映射关系,并把相应的事件通过函数`event_queue_insert`放到相应的队列里。
-
-同时，对于所有事件可以发现，其都会根据当前时间和超时的时间长度计算事件触发的时间，并将其按照*超时类型*的时间放到最小堆中，同时还会检查更新后的最小堆中最早的超时时间是不是比之前的要早一些，如果早的话要提前通知主线程，其实现逻辑如下:
+对于`tv`不是空指针的情况，就说明是一个超时event,在小根堆中为其留一个位置，代码如下：
 ```
-
-		gettime(base, &now);
-
-		common_timeout = is_common_timeout(tv, base);
-		if (tv_is_absolute) {
-			ev->ev_timeout = *tv;
-		} else if (common_timeout) {
-			struct timeval tmp = *tv;
-			tmp.tv_usec &= MICROSECONDS_MASK;
-			evutil_timeradd(&now, &tmp, &ev->ev_timeout);
-			ev->ev_timeout.tv_usec |=
-			    (tv->tv_usec & ~MICROSECONDS_MASK);
-		} else {
-			evutil_timeradd(&now, tv, &ev->ev_timeout);
-		}
-
-		event_debug((
-			 "event_add: timeout in %d seconds, call %p\n",
-			 (int)tv->tv_sec, ev->ev_callback));
-
-		event_queue_insert(base, ev, EVLIST_TIMEOUT);
-		if (common_timeout) {
-			struct common_timeout_list *ctl =
-			    get_common_timeout_list(base, &ev->ev_timeout);
-			if (ev == TAILQ_FIRST(&ctl->events)) {
-				common_timeout_schedule(ctl, &now, ev);
-			}
-		} else {
-			/* See if the earliest timeout is now earlier than it
-			 * was before: if so, we will need to tell the main
-			 * thread to wake up earlier than it would
-			 * otherwise. */
-			if (min_heap_elt_is_top(ev)) {
-				notify = 1;
-			}
-		}
+if (tv != NULL && !(ev->ev_flags & EVLIST_TIMEOUT)) {
+		if (min_heap_reserve(&base->timeheap,
+			1 + min_heap_size(&base->timeheap)) == -1)
+			return (-1);  /* ENOMEM == errno */
 	}
-
-	/* if we are not in the right thread, we need to wake up the loop */
-	if (res != -1 && notify && EVBASE_NEED_NOTIFY(base)) {
-		evthread_notify_base(base);
-	}
-
-	_event_debug_note_add(ev);
-
 ```
+然后将IO或者信号event插入到对应的队列中：
+```
+if ((ev->ev_events & (EV_READ|EV_WRITE|EV_SIGNAL)) &&
+        !(ev->ev_flags & (EVLIST_INSERTED|EVLIST_ACTIVE))) {
+    if (ev->ev_events & (EV_READ|EV_WRITE)) {
+        res = evmap_io_add(base, ev->ev_fd, ev);
+    }
+    else if (ev->ev_events & EV_SIGNAL) {
+        res = evmap_signal_add(base, (int)ev->ev_fd, ev);
+    }
+    if (res != -1) {
+        event_queue_insert(base, ev, EVLIST_INSERTED);
+    }
+    if (res == 1) {
+        notify = 1;
+        res = 0;
+    }
+}
+```
+用户把这个event设置成EV_PERSIST，永久event。如果没有这样设置的话，那么只会超时一次；如果设置了，那么就可以超时多次，那么就要记录用户设置的超时值，代码如下：
+```
+if (ev->ev_closure == EV_CLOSURE_PERSIST && !tv_is_absolute)
+            ev->ev_io_timeout = *tv;
+```
+用户可以对同一个event调用多次event_add并且可以每次都用不同的超时值,对于多次对同一个超时event调用event_add,那么只能保留最后的那个，实现代码如下：
+```
+if (ev->ev_flags & EVLIST_TIMEOUT) {
+    /* XXX I believe this is needless. */
+    if (min_heap_elt_is_top(ev))
+        notify = 1;
+    event_queue_remove(base, ev, EVLIST_TIMEOUT);
+}
+```
+上述代码中，如果同时需要删除堆顶的元素，则需要更新`notify`变量通知主线程。
+因为可以在次线程调用event_add。而主线程刚好在执行event_base_dispatch，所以还需要再一次处理**已经被超时激活的event**.
+
+最后将该event插入到定时器队列中，并判断定时器是不是最小值已通知主线程更新。
+
 ### event_base_dispatch()函数
 
 `event_base_dispatch()`函数的调用过程如下：
