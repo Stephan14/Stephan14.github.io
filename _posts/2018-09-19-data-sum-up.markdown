@@ -154,7 +154,7 @@ b := []int{}
         println(m["a"])
         m["a"] = 1
 
-        var m2 map[string]int
+        var m2 map[string]int{}
     }
     ```
 - 在迭代期间，新增或者删除key是安全的
