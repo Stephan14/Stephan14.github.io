@@ -113,6 +113,7 @@ def ready(self, cluster):
             if not dq:
                 continue
             batch = dq[0]
+            # 每个ProducerBatch不是立即发送，需要等待一段时间
             retry_backoff = self.config['retry_backoff_ms'] / 1000.0
             linger = self.config['linger_ms'] / 1000.0
             # 判断是不是处于等待重试状态中
@@ -209,4 +210,125 @@ def reenqueue(self, batch):
     dq = self._batches[batch.topic_partition]
     with self._tp_locks[batch.topic_partition]:
         dq.appendleft(batch)
+```
+
+## Sender结构
+`Sender`是一个线程起主要功能是发送producer请求进行生产数据，主要函数`run`如下：
+```
+def run(self):
+    """The main run loop for the sender thread."""
+    log.debug("Starting Kafka producer I/O thread.")
+
+    # main loop, runs until close is called
+    # 当线程没有关闭的时候一直调用run_once构造request
+    while self._running:
+        try:
+            self.run_once()
+        except Exception:
+            log.exception("Uncaught error in kafka producer I/O thread")
+
+    log.debug("Beginning shutdown of Kafka producer I/O thread, sending"
+              " remaining records.")
+
+    # okay we stopped accepting requests but there may still be
+    # requests in the accumulator or waiting for acknowledgment,
+    # wait until these are completed.
+    # 如果不是强制关闭线程，会一直等待没有发送的数据发送完毕
+    while (not self._force_close
+           and (self._accumulator.has_unsent()
+                or self._client.in_flight_request_count() > 0)):
+        try:
+            self.run_once()
+        except Exception:
+            log.exception("Uncaught error in kafka producer I/O thread")
+    # 如果是强制关闭，丢弃掉没有发送出去的数据
+    if self._force_close:
+        # We need to fail all the incomplete batches and wake up the
+        # threads waiting on the futures.
+        self._accumulator.abort_incomplete_batches()
+
+    try:
+        self._client.close()
+    except Exception:
+        log.exception("Failed to close network client")
+
+    log.debug("Shutdown of Kafka producer I/O thread has completed.")
+```
+下面介绍一下比较重要的`run_once`函数：
+```
+def run_once(self):
+    """Run a single iteration of sending."""
+    while self._topics_to_add:
+        self._client.add_topic(self._topics_to_add.pop())
+
+    # get the list of partitions with data ready to send
+    # 根据metadata数据判断当前那个节点是可以发送request、以及下次检查的时间和是否有不知道leader的parition
+    result = self._accumulator.ready(self._metadata)
+    ready_nodes, next_ready_check_delay, unknown_leaders_exist = result
+
+    # if there are any partitions whose leaders are not known yet, force
+    # metadata update
+    # 如果某些parition找不到leader，会更新metadata
+    if unknown_leaders_exist:
+        log.debug('Unknown leaders exist, requesting metadata update')
+        self._metadata.request_update()
+
+    # remove any nodes we aren't ready to send to
+    not_ready_timeout = float('inf')
+    for node in list(ready_nodes):
+        # 根据请求队列和连接情况以及metadata信息情况判断是不是可以发送请求
+        if not self._client.ready(node):
+            log.debug('Node %s not ready; delaying produce of accumulated batch', node)
+            ready_nodes.remove(node)
+            not_ready_timeout = min(not_ready_timeout,
+                                    self._client.connection_delay(node))
+
+    # create produce requests
+    # 为每个节点发送回去相应的写入数据
+    batches_by_node = self._accumulator.drain(
+        self._metadata, ready_nodes, self.config['max_request_size'])
+    # 如果是在要求保证顺序的情况下，将节点加入muted集合中，等到相应的response收到之后再移除
+    if self.config['guarantee_message_order']:
+        # Mute all the partitions drained
+        for batch_list in six.itervalues(batches_by_node):
+            for batch in batch_list:
+                self._accumulator.muted.add(batch.topic_partition)
+
+    expired_batches = self._accumulator.abort_expired_batches(
+        self.config['request_timeout_ms'], self._metadata)
+    for expired_batch in expired_batches:
+        self._sensors.record_errors(expired_batch.topic_partition.topic, expired_batch.record_count)
+
+    self._sensors.update_produce_request_metrics(batches_by_node)
+    requests = self._create_produce_requests(batches_by_node)
+    # If we have any nodes that are ready to send + have sendable data,
+    # poll with 0 timeout so this can immediately loop and try sending more
+    # data. Otherwise, the timeout is determined by nodes that have
+    # partitions with data that isn't yet sendable (e.g. lingering, backing
+    # off). Note that this specifically does not include nodes with
+    # sendable data that aren't ready to send since they would cause busy
+    # looping.
+    poll_timeout_ms = min(next_ready_check_delay * 1000, not_ready_timeout)
+    if ready_nodes:
+        log.debug("Nodes with data ready to send: %s", ready_nodes) # trace
+        log.debug("Created %d produce requests: %s", len(requests), requests) # trace
+        poll_timeout_ms = 0
+
+    for node_id, request in six.iteritems(requests):
+        batches = batches_by_node[node_id]
+        log.debug('Sending Produce Request: %r', request)
+        (self._client.send(node_id, request)
+             .add_callback(
+                 self._handle_produce_response, node_id, time.time(), batches)
+             .add_errback(
+                 self._failed_produce, batches, node_id))
+
+    # if some partitions are already ready to be sent, the select time
+    # would be 0; otherwise if some partition already has some data
+    # accumulated but not ready yet, the select time will be the time
+    # difference between now and its linger expiry time; otherwise the
+    # select time will be the time difference between now and the
+    # metadata expiry time
+    self._client.poll(poll_timeout_ms)
+
 ```
