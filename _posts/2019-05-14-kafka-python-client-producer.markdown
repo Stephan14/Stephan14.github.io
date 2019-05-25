@@ -16,6 +16,58 @@ tags:
 - `RecordAccumulator`:包含写入数据的批量管理
 - `Sender`:是个线程，主要负责发送produce request以及获取response
 
+## `ProducerBatch`结构
+
+在介绍`KafkaClient`、`RecordAccumulator`、`Sender`上述三种结构之前，先介绍一下
+`ProducerBatch`这个结构，它是生产者通过batch发送数据的基础。
+
+通过函数`try_append`向batch中添加数据：
+```
+def try_append(self, timestamp_ms, key, value, headers):
+    metadata = self.records.append(timestamp_ms, key, value, headers)
+    if metadata is None:
+        return None
+
+    self.max_record_size = max(self.max_record_size, metadata.size)
+    self.last_append = time.time()
+    future = FutureRecordMetadata(self.produce_future, metadata.offset,
+                                  metadata.timestamp, metadata.crc,
+                                  len(key) if key is not None else -1,
+                                  len(value) if value is not None else -1,
+                                  sum(len(h_key.encode("utf-8")) + len(h_val) for h_key, h_val in headers) if headers else -1)
+    return future
+```
+records变量为MemoryRecordsBuilder的对象，在MemoryRecordsBuilder内部根据不同的版本构建不同的类来存储数据，通过append函数将数据转换成二进制写入到_buffer变量中，当Sender线程发送数据或者丢弃掉过期的数据的时候会对数据`ProducerBatch`中的数据进行压缩。一个produce_future对应多个FutureRecordMetadata对象，FutureRecordMetadata对象返回给上层send函数，用户可以自定义回调函数，回调函数的参数类型为RecordMetadata。当produce_future对象的success或者failure函数被调用的时候，就会触发调用FutureRecordMetadata对象的success或者failure函数，最终触发用户自定义的回调函数。
+
+当用户缓存的`ProduerBatch`被发送并收到发送成功或者发送失败的response的时候，会调用`done`函数，最终调用用户的自定义的回调函数：
+```
+def done(self, base_offset=None, timestamp_ms=None, exception=None):
+    level = logging.DEBUG if exception is None else logging.WARNING
+    log.log(level, "Produced messages to topic-partition %s with base offset"
+              " %s and error %s.", self.topic_partition, base_offset,
+              exception)  # trace
+    if self.produce_future.is_done:
+        log.warning('Batch is already closed -- ignoring batch.done()')
+        return
+    elif exception is None:
+        self.produce_future.success((base_offset, timestamp_ms))
+    else:
+        self.produce_future.failure(exception)
+```
+上述代码中`self.produce_future.success`和`self.produce_future.failure`的调用，会回调`FutureRecordMetadata`中的`_produce_success`和`failure`函数，这两个回调函数的设置可以在`FutureRecordMetadata`的构造函数中看到，代码如下：
+```
+def __init__(self, produce_future, relative_offset, timestamp_ms, checksum, serialized_key_size, serialized_value_size, serialized_header_size):
+    super(FutureRecordMetadata, self).__init__()
+    self._produce_future = produce_future
+    # packing args as a tuple is a minor speed optimization
+    self.args = (relative_offset, timestamp_ms, checksum, serialized_key_size, serialized_value_size, serialized_header_size)
+    produce_future.add_callback(self._produce_success)
+    produce_future.add_errback(self.failure)
+```
+其中的`_produce_success`函数会调用`FutureRecordMetadata`的回调函数。
+
+`ProducerBatch`类中还有一个函数`maybe_expire`，这个函数主要是用来判断`ProduerBatch`是不是已经超时了，比如batch已经满了等待时间已经超过了设置的超时时间或者在重试的过程中超时等情况，此时设置error为`KafkaTimeoutError`
+
 ## RecordAccumulator结构
 `RecordAccumulator`类主要负责在客户端本地缓存发送的数据以及相应的内存管理。其中比较重要的函数又如下几个：
 
@@ -171,7 +223,7 @@ def drain(self, cluster, nodes, max_size):
                         )
                         # Only drain the batch if it is not during backoff
                         if not backoff:
-                            # 如果所有的发送的数据超过max_request_size的大小并且已经从batch中取到数据，则结束数据的获取；如果第一个batch中的数据就达到了max_request_size的大小限制，就只发送这一个batch的数据
+                            # 如果所有的发送的数据超过max_request_size的大小并且已经从batch中取到数据，则结束数据的获取；如果第一个batch中的数据就达到了max_request_size的大小限制，就只发送这一个batch的数据，从而保证每个request的大小不超过max_request_size的配置
                             if (size + first.records.size_in_bytes() > max_size
                                 and len(ready) > 0):
                                 # there is a rare case that a single batch
@@ -182,6 +234,7 @@ def drain(self, cluster, nodes, max_size):
                                 break
                             else:
                                 batch = dq.popleft()
+                                # 会对ProducerBatch中的数据进行压缩
                                 batch.records.close()
                                 size += batch.records.size_in_bytes()
                                 ready.append(batch)
@@ -196,7 +249,7 @@ def drain(self, cluster, nodes, max_size):
         batches[node_id] = ready
     return batches
 ```
-函数`reenqueue`由`_complete_batch`函数在重试的时候调用，重试是按照`ProducerBatch`维度来重试：
+函数`reenqueue`由`_complete_batch`函数在重试的时候调用，重试是按照`ProducerBatch`粒度来重试：
 ```
 def reenqueue(self, batch):
     """Re-enqueue the given record batch in the accumulator to retry."""
@@ -210,6 +263,60 @@ def reenqueue(self, batch):
     dq = self._batches[batch.topic_partition]
     with self._tp_locks[batch.topic_partition]:
         dq.appendleft(batch)
+```
+
+最后还有一个`abort_expired_batches`函数，这个函数是用来判断一个本地缓存中还没有发送出去并且等待时间超过`request_timeout_ms`参数的`ProduerBatch`。因为我们通常理解的timeout是客户端发送出去request之后超过一定的时间没有收到response而导致的超时，但是，还有一种情况就是客户端要发送的数据太多了，导致本地缓存积攒的很多的数据，这些数据还没有来的及拷贝发送到socket中，如果这样积攒的时间过长，对于上层的用户来说的也算是timeout。代码中有两个需要特别注意的地方
+```
+def abort_expired_batches(self, request_timeout_ms, cluster):
+    expired_batches = []
+    to_remove = []
+    count = 0
+    for tp in list(self._batches.keys()):
+        assert tp in self._tp_locks, 'TopicPartition not in locks dict'
+
+        # We only check if the batch should be expired if the partition
+        # does not have a batch in flight. This is to avoid the later
+        # batches get expired when an earlier batch is still in progress.
+        # This protection only takes effect when user sets
+        # max.in.flight.request.per.connection=1. Otherwise the expiration
+        # order is not guranteed.
+        # 对于那些需要保证顺序的partition的ProducerBatch来说，其不会在考虑范围中
+        if tp in self.muted:
+            continue
+
+        with self._tp_locks[tp]:
+            # iterate over the batches and expire them if they have stayed
+            # in accumulator for more than request_timeout_ms
+            dq = self._batches[tp]
+            for batch in dq:
+                # 对于有多个ProducerBatch但是当前parition不是最新的ProducerBatch或者只有一个ProducerBatch，但是这个ProducerBatch的size已经达到了参数配置的要求，认为这个batch已经满了
+                is_full = bool(bool(batch != dq[-1]) or batch.records.is_full())
+                # check if the batch is expired
+                if batch.maybe_expire(request_timeout_ms,
+                                      self.config['retry_backoff_ms'],
+                                      self.config['linger_ms'],
+                                      is_full):
+                    expired_batches.append(batch)
+                    to_remove.append(batch)
+                    count += 1
+                    self.deallocate(batch)
+                else:
+                    # 如果前面的ProducerBatch没有过期，后面的就不用看了
+                    # Stop at the first batch that has not expired.
+                    break
+
+            # Python does not allow us to mutate the dq during iteration
+            # Assuming expired batches are infrequent, this is better than
+            # creating a new copy of the deque for iteration on every loop
+            if to_remove:
+                for batch in to_remove:
+                    dq.remove(batch)
+                to_remove = []
+
+    if expired_batches:
+        log.warning("Expired %d batches in accumulator", count) # trace
+
+    return expired_batches
 ```
 
 ## Sender结构
@@ -234,6 +341,7 @@ def run(self):
     # requests in the accumulator or waiting for acknowledgment,
     # wait until these are completed.
     # 如果不是强制关闭线程，会一直等待没有发送的数据发送完毕
+    # 考虑如果集群正在升级重启，会不会导致丢失response，导致一直hang在这？
     while (not self._force_close
            and (self._accumulator.has_unsent()
                 or self._client.in_flight_request_count() > 0)):
@@ -287,18 +395,18 @@ def run_once(self):
     # 为每个节点发送回去相应的写入数据
     batches_by_node = self._accumulator.drain(
         self._metadata, ready_nodes, self.config['max_request_size'])
-    # 如果是在要求保证顺序的情况下，将节点加入muted集合中，等到相应的response收到之后再移除
+    # 如果是在要求保证顺序的情况下，将partition加入muted集合中，等到相应的response收到之后再移除
     if self.config['guarantee_message_order']:
         # Mute all the partitions drained
         for batch_list in six.itervalues(batches_by_node):
             for batch in batch_list:
                 self._accumulator.muted.add(batch.topic_partition)
-
+    # 对于那些缓存在本地超时没有发出去的ProducerBatch丢弃掉,此时需要用户自定义回调函数来处理这种失败的情况               
     expired_batches = self._accumulator.abort_expired_batches(
         self.config['request_timeout_ms'], self._metadata)
     for expired_batch in expired_batches:
         self._sensors.record_errors(expired_batch.topic_partition.topic, expired_batch.record_count)
-
+    # 为每个节点构造一个request
     self._sensors.update_produce_request_metrics(batches_by_node)
     requests = self._create_produce_requests(batches_by_node)
     # If we have any nodes that are ready to send + have sendable data,
@@ -308,6 +416,7 @@ def run_once(self):
     # off). Note that this specifically does not include nodes with
     # sendable data that aren't ready to send since they would cause busy
     # looping.
+    # next_ready_check_delay 表示batch等待发送的最小时间
     poll_timeout_ms = min(next_ready_check_delay * 1000, not_ready_timeout)
     if ready_nodes:
         log.debug("Nodes with data ready to send: %s", ready_nodes) # trace
@@ -330,5 +439,124 @@ def run_once(self):
     # select time will be the time difference between now and the
     # metadata expiry time
     self._client.poll(poll_timeout_ms)
-
 ```
+
+上面的`_handle_produce_response`函数处理收到的response, 包括回收缓存、处理重试错误，将需要有序的parition从muted集合中移除等操作，对于`ack`为0的情况下不处理收到的error code，也就不会进行重试。而对于`_failed_produce`函数，无论对于参数`ack`设置成什么值，都会根据相应的error code进行相应的重试逻辑
+
+
+## KafkaClient结构
+`KafkaClient`是kafka客户端中非常重要的一个类，consumer和producer都依赖这个类实现一些功能，先来介绍一下期中被使用的次数的函数`poll`,这个函数是尝试读写socket中个数据：
+```
+def poll(self, timeout_ms=None, future=None):
+    if future is not None:
+        timeout_ms = 100
+    elif timeout_ms is None:
+        timeout_ms = self.config['request_timeout_ms']
+    elif not isinstance(timeout_ms, (int, float)):
+        raise TypeError('Invalid type for timeout: %s' % type(timeout_ms))
+
+    # Loop for futures, break after first loop if None
+    responses = []
+    while True:
+        with self._lock:
+            if self._closed:
+                break
+            # 对于不在broker不在metadata中和端口发生变换的broker进行重连
+            # Attempt to complete pending connections
+            for node_id in list(self._connecting):
+                self._maybe_connect(node_id)
+
+            # Send a metadata request if needed
+            metadata_timeout_ms = self._maybe_refresh_metadata()
+
+            # If we got a future that is already done, don't block in _poll
+            if future is not None and future.is_done:
+                timeout = 0
+            else:
+                idle_connection_timeout_ms = self._idle_expiry_manager.next_check_ms()
+                # 获取最小的timeout时间保证线程阻塞的时间最短
+                timeout = min(
+                    timeout_ms,
+                    metadata_timeout_ms,
+                    idle_connection_timeout_ms,
+                    self.config['request_timeout_ms'])
+                timeout = max(0, timeout / 1000)  # avoid negative timeouts
+
+            self._poll(timeout)
+
+            responses.extend(self._fire_pending_completed_requests())
+
+        # If all we had was a timeout (future is None) - only do one poll
+        # If we do have a future, we keep looping until it is done
+        if future is None or future.is_done:
+            break
+
+    return responses
+```
+
+对于`_maybe_refresh_metadata`函数中，如果元信息的ttl或者request_timeout_ms大于0，返回其最大值；如果broker连不上了则返回reconnect_backoff_ms；如果连接上了则返回request_timeout_ms，也就意味只有在**metadata数据的元信息已经过期并且没有正在刷新并且请求量最小的broker可以继续发送请求**的情况下才可以继续更新metadata相关的数据。着关于_poll()函数随后介绍一下，其主要功能是通过io多路复用的方式获取socket中数据，将数据以及`Future`对象放到放到`_pending_completion`中，然后通过函数`_fire_pending_completed_requests`将`response`以及相应的`Future`对象的状态置位为success。
+
+
+下面介绍一下`_poll`函数，这个函数的核心就是调用select函数实现io多路复用，当时可以根据用户的需求配置epoll、poll等函数。代码如下：
+```
+def _poll(self, timeout):
+    processed = set()
+
+    start_select = time.time()
+    ready = self._selector.select(timeout)
+    end_select = time.time()
+    if self._sensors:
+        self._sensors.select_time.record((end_select - start_select) * 1000000000)
+
+    for key, events in ready:
+        if key.fileobj is self._wake_r:
+            self._clear_wake_fd()
+            continue
+        elif not (events & selectors.EVENT_READ):
+            continue
+        conn = key.data
+        processed.add(conn)
+
+        if not conn.in_flight_requests:
+            # if we got an EVENT_READ but there were no in-flight requests, one of
+            # two things has happened:
+            #
+            # 1. The remote end closed the connection (because it died, or because
+            #    a firewall timed out, or whatever)
+            # 2. The protocol is out of sync.
+            #
+            # either way, we can no longer safely use this connection
+            #
+            # Do a 1-byte read to check protocol didnt get out of sync, and then close the conn
+            try:
+                unexpected_data = key.fileobj.recv(1)
+                if unexpected_data:  # anything other than a 0-byte read means protocol issues
+                    log.warning('Protocol out of sync on %r, closing', conn)
+            except socket.error:
+                pass
+            conn.close(Errors.KafkaConnectionError('Socket EVENT_READ without in-flight-requests'))
+            continue
+
+        self._idle_expiry_manager.update(conn.node_id)
+        self._pending_completion.extend(conn.recv())
+
+    # Check for additional pending SSL bytes
+    if self.config['security_protocol'] in ('SSL', 'SASL_SSL'):
+        for conn in self._conns.values():
+            if conn not in processed and conn.connected() and conn._sock.pending():
+                self._pending_completion.extend(conn.recv())
+
+    for conn in six.itervalues(self._conns):
+        if conn.requests_timed_out():
+            log.warning('%s timed out after %s ms. Closing connection.',
+                        conn, conn.config['request_timeout_ms'])
+            conn.close(error=Errors.RequestTimedOutError(
+                'Request timed out after %s ms' %
+                conn.config['request_timeout_ms']))
+
+    if self._sensors:
+        self._sensors.io_time.record((time.time() - end_select) * 1000000000)
+
+    self._maybe_close_oldest_connection()
+```
+上述函数中对已经注册的`socket`(已经被封装成为`SelectorKey`)进行监听，判断这个`socket`是不是已经可读、可写，获取已经就绪的`socket`对应的`broker connection`，对于那些broker的请求队列为空的情况下(通常是因为对端关闭连接或者协议不同步导致的),关闭连接；同时会更新相关的`broker`的接受数据的时间，方便后续客户端关闭空闲连接。对于每个`broker`的连接，还会判断其发送的请求有没有超时的，如果超时了关闭连接并且将请求队列上的请求设置为超时状态，会新建连接让其重试。最后，会关闭空闲时间比较长的连接。
