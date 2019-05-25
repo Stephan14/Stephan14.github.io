@@ -16,7 +16,7 @@ tags:
 - `RecordAccumulator`:包含写入数据的批量管理
 - `Sender`:是个线程，主要负责发送produce request以及获取response
 
-## `ProducerBatch`结构
+## ProducerBatch结构
 
 在介绍`KafkaClient`、`RecordAccumulator`、`Sender`上述三种结构之前，先介绍一下
 `ProducerBatch`这个结构，它是生产者通过batch发送数据的基础。
