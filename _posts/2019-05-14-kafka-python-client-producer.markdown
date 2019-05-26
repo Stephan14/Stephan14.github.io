@@ -509,6 +509,8 @@ def _poll(self, timeout):
         self._sensors.select_time.record((end_select - start_select) * 1000000000)
 
     for key, events in ready:
+        # _wake_r为非阻塞的socket
+        # 当想让poll线程不阻塞的时候，通过_wake_r唤醒当前线程,这样就不会阻塞sender线程
         if key.fileobj is self._wake_r:
             self._clear_wake_fd()
             continue
@@ -545,7 +547,7 @@ def _poll(self, timeout):
         for conn in self._conns.values():
             if conn not in processed and conn.connected() and conn._sock.pending():
                 self._pending_completion.extend(conn.recv())
-
+    # 判断每个连接中是否有超时的请求，这些请求是通过select发现不了的
     for conn in six.itervalues(self._conns):
         if conn.requests_timed_out():
             log.warning('%s timed out after %s ms. Closing connection.',
@@ -559,4 +561,27 @@ def _poll(self, timeout):
 
     self._maybe_close_oldest_connection()
 ```
-上述函数中对已经注册的`socket`(已经被封装成为`SelectorKey`)进行监听，判断这个`socket`是不是已经可读、可写，获取已经就绪的`socket`对应的`broker connection`，对于那些broker的请求队列为空的情况下(通常是因为对端关闭连接或者协议不同步导致的),关闭连接；同时会更新相关的`broker`的接受数据的时间，方便后续客户端关闭空闲连接。对于每个`broker`的连接，还会判断其发送的请求有没有超时的，如果超时了关闭连接并且将请求队列上的请求设置为超时状态，会新建连接让其重试。最后，会关闭空闲时间比较长的连接。
+上述函数中对已经注册的`socket`(已经被封装成为`SelectorKey`)进行监听，判断这个`socket`是不是已经可读、可写，获取已经就绪的`socket`对应的`broker connection`，对于那些broker的请求队列为空的情况下(通常是因为对端关闭连接或者协议不同步导致的),关闭连接；同时会更新相关的`broker`的连接接受数据的时间，方便后续客户端关闭空闲连接。其中有一个特殊的`socket`为`_wake_r`,其是通过`socketpair`创建的之一，其主要功能是用于`sender`线程和`poll`线程之间进行通信。对于每个`broker`的连接，还会判断其发送的请求有没有超时的，如果超时了关闭连接并且将请求队列上的请求设置为超时状态，会新建连接让其重试。最后，会关闭空闲时间比较长的连接。
+
+上面介绍了从socket中获取数据，下面介绍一个客户端向sokcet中发送数据的函数，对于生产者来说其实只发送两种请求，分别为`MetadataRequset`和`ProdcueRequest`，其最终都是通过调用`KafkaClinet`中的`send`函数实现的：
+```
+def send(self, node_id, request, wakeup=True):
+    conn = self._conns.get(node_id)
+    if not conn or not self._can_send_request(node_id):
+        self.maybe_connect(node_id, wakeup=wakeup)
+        return Future().failure(Errors.NodeNotReadyError(node_id))
+
+    # conn.send will queue the request internally
+    # we will need to call send_pending_requests()
+    # to trigger network I/O
+    future = conn.send(request, blocking=False)
+
+    # Wakeup signal is useful in case another thread is
+    # blocked waiting for incoming network traffic while holding
+    # the client lock in poll().
+    if wakeup:
+        self.wakeup()
+
+    return future
+```
+在通过此函数向一个`broker`发送请求实，首先会判断客户端是不是已经连接上该`broker`或者该发送该broker的请求队列是不是已经是满的了，如果连接不上或者请求队列已经满了，则会进行将该`broker`加入到一个队列中进行排队等待连接，等待在`poll`的时候进行重连，此时，对于请求队列已经满的broker不会进行重连。对于其中的`conn.send(request, blocking=False)`函数，在发送之前会判断与`broker`连接的状态，然后将响应的`request`对象转换成二进制数据放到内存中，再生成一个`correlation_id`，并将`correlation_id`和`future`对象放入到`in_flight_requests`中，以方便在收到`response`之后进行相应的处理。如果`blocking`设置为`True`的情况下，会将刚才提的二进制数据通过`socket`发送出去，如果发送超时会关闭连接,最后是向`socketpair`发送数据，唤醒`poll`线程从而释放锁。
