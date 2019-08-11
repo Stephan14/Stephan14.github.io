@@ -6,7 +6,7 @@ date:       2019-01-01 14:32:30
 author:     "邹盛富"
 header-img: "img/a657bccde524f45e21195d584d4849a5_hd.jpg"
 tags:
-    - C++
+    - C/C++
 ---
 
 ## 问题与现状

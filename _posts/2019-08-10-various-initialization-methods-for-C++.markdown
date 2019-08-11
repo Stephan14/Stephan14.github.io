@@ -6,7 +6,7 @@ date:       2019-08-10 17:24:30
 author:     "pluse"
 header-img: "img/person-498197_1920.jpg"
 tags:
-    - C++
+    - C/C++
 ---
 C++小实验测试：下面程序中main函数里a.a和b.b的输出值是多少？
 ```
