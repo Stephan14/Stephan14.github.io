@@ -37,9 +37,9 @@ def try_append(self, timestamp_ms, key, value, headers):
                                   sum(len(h_key.encode("utf-8")) + len(h_val) for h_key, h_val in headers) if headers else -1)
     return future
 ```
-records变量为MemoryRecordsBuilder的对象，在MemoryRecordsBuilder内部根据不同的版本构建不同的类来存储数据，通过append函数将数据转换成二进制写入到_buffer变量中，当Sender线程发送数据或者丢弃掉过期的数据的时候会对数据`ProducerBatch`中的数据进行压缩。一个produce_future对应多个FutureRecordMetadata对象，FutureRecordMetadata对象返回给上层send函数，用户可以自定义回调函数，回调函数的参数类型为RecordMetadata。当produce_future对象的success或者failure函数被调用的时候，就会触发调用FutureRecordMetadata对象的success或者failure函数，最终触发用户自定义的回调函数。
+`records`变量为`MemoryRecordsBuilder`的对象，在`MemoryRecordsBuilder`内部根据不同的版本构建不同的类来存储数据，通过`append`函数将数据转换成二进制写入到`_buffer`变量中，当`Sender`线程发送数据或者丢弃掉过期的数据的时候会对数据`ProducerBatch`中的数据进行压缩。一个`produce_future`对应多个`FutureRecordMetadata`对象，`FutureRecordMetadata`对象返回给上层`send`函数，用户可以自定义回调函数，回调函数的参数类型为`RecordMetadata`。当`produce_future`对象的`success`或者`failure`函数被调用的时候，就会触发调用`FutureRecordMetadata`对象的`success`或者`failure`函数，最终触发用户自定义的回调函数。
 
-当用户缓存的`ProduerBatch`被发送并收到发送成功或者发送失败的response的时候，会调用`done`函数，最终调用用户的自定义的回调函数：
+当用户缓存的`ProduerBatch`被发送并收到发送成功或者发送失败的`response`的时候，会调用`done`函数，最终调用用户的自定义的回调函数：
 ```
 def done(self, base_offset=None, timestamp_ms=None, exception=None):
     level = logging.DEBUG if exception is None else logging.WARNING
@@ -66,7 +66,7 @@ def __init__(self, produce_future, relative_offset, timestamp_ms, checksum, seri
 ```
 其中的`_produce_success`函数会调用`FutureRecordMetadata`的回调函数。
 
-`ProducerBatch`类中还有一个函数`maybe_expire`，这个函数主要是用来判断`ProduerBatch`是不是已经超时了，比如batch已经满了等待时间已经超过了设置的超时时间或者在重试的过程中超时等情况，此时设置error为`KafkaTimeoutError`
+`ProducerBatch`类中还有一个函数`maybe_expire`，这个函数主要是用来判断`ProduerBatch`是不是已经超时了，比如`batch`已经满了等待时间已经超过了设置的超时时间或者在重试的过程中超时等情况，此时设置`error`为`KafkaTimeoutError`
 
 ## RecordAccumulator结构
 `RecordAccumulator`类主要负责在客户端本地缓存发送的数据以及相应的内存管理。其中比较重要的函数又如下几个：
@@ -265,7 +265,7 @@ def reenqueue(self, batch):
         dq.appendleft(batch)
 ```
 
-最后还有一个`abort_expired_batches`函数，这个函数是用来判断一个本地缓存中还没有发送出去并且等待时间超过`request_timeout_ms`参数的`ProduerBatch`。因为我们通常理解的timeout是客户端发送出去request之后超过一定的时间没有收到response而导致的超时，但是，还有一种情况就是客户端要发送的数据太多了，导致本地缓存积攒的很多的数据，这些数据还没有来的及拷贝发送到socket中，如果这样积攒的时间过长，对于上层的用户来说的也算是timeout。代码中有两个需要特别注意的地方
+最后还有一个`abort_expired_batches`函数，这个函数是用来判断一个本地缓存中还没有发送出去并且等待时间超过`request_timeout_ms`参数的`ProduerBatch`。因为我们通常理解的`timeout`是客户端发送出去request之后超过一定的时间没有收到`response`而导致的超时，但是，还有一种情况就是客户端要发送的数据太多了，导致本地缓存积攒的很多的数据，这些数据还没有来的及拷贝发送到`socket`中，如果这样积攒的时间过长，对于上层的用户来说的也算是`timeout`。代码中有两个需要特别注意的地方
 ```
 def abort_expired_batches(self, request_timeout_ms, cluster):
     expired_batches = []
@@ -441,11 +441,11 @@ def run_once(self):
     self._client.poll(poll_timeout_ms)
 ```
 
-上面的`_handle_produce_response`函数处理收到的response, 包括回收缓存、处理重试错误，将需要有序的parition从muted集合中移除等操作，对于`ack`为0的情况下不处理收到的error code，也就不会进行重试。而对于`_failed_produce`函数，无论对于参数`ack`设置成什么值，都会根据相应的error code进行相应的重试逻辑
+上面的`_handle_produce_response`函数处理收到的`response`, 包括回收缓存、处理重试错误，将需要有序的`parition`从`muted`集合中移除等操作，对于`ack`为0的情况下不处理收到的`error code`，也就不会进行重试。而对于`_failed_produce`函数，无论对于参数`ack`设置成什么值，都会根据相应的`error code`进行相应的重试逻辑
 
 
 ## KafkaClient结构
-`KafkaClient`是kafka客户端中非常重要的一个类，consumer和producer都依赖这个类实现一些功能，先来介绍一下期中被使用的次数的函数`poll`,这个函数是尝试读写socket中个数据：
+`KafkaClient`是kafka客户端中非常重要的一个类，consumer和producer都依赖这个类实现一些功能，先来介绍一下期中被使用的次数的函数`poll`,这个函数是尝试读写`socket`中个数据：
 ```
 def poll(self, timeout_ms=None, future=None):
     if future is not None:
@@ -494,7 +494,7 @@ def poll(self, timeout_ms=None, future=None):
     return responses
 ```
 
-对于`_maybe_refresh_metadata`函数中，如果元信息的ttl或者request_timeout_ms大于0，返回其最大值；如果broker连不上了则返回reconnect_backoff_ms；如果连接上了则返回request_timeout_ms，也就意味只有在**metadata数据的元信息已经过期并且没有正在刷新并且请求量最小的broker可以继续发送请求**的情况下才可以继续更新metadata相关的数据。着关于_poll()函数随后介绍一下，其主要功能是通过io多路复用的方式获取socket中数据，将数据以及`Future`对象放到放到`_pending_completion`中，然后通过函数`_fire_pending_completed_requests`将`response`以及相应的`Future`对象的状态置位为success。
+对于`_maybe_refresh_metadata`函数中，如果元信息的`ttl`或者`request_timeout_ms`大于0，返回其最大值；如果`broker`连不上了则返回`reconnect_backoff_ms`；如果连接上了则返回`request_timeout_ms`，也就意味只有在**metadata数据的元信息已经过期并且没有正在刷新并且请求量最小的broker可以继续发送请求**的情况下才可以继续更新metadata相关的数据。着关于_poll()函数随后介绍一下，其主要功能是通过io多路复用的方式获取`socket`中数据，将数据以及`Future`对象放到放到`_pending_completion`中，然后通过函数`_fire_pending_completed_requests`将`response`以及相应的`Future`对象的状态置位为`success`。
 
 
 下面介绍一下`_poll`函数，这个函数的核心就是调用select函数实现io多路复用，当时可以根据用户的需求配置epoll、poll等函数。代码如下：
@@ -509,6 +509,8 @@ def _poll(self, timeout):
         self._sensors.select_time.record((end_select - start_select) * 1000000000)
 
     for key, events in ready:
+        # _wake_r为非阻塞的socket
+        # 当想让poll线程不阻塞的时候，通过_wake_r唤醒当前线程,这样就不会阻塞sender线程
         if key.fileobj is self._wake_r:
             self._clear_wake_fd()
             continue
@@ -545,7 +547,7 @@ def _poll(self, timeout):
         for conn in self._conns.values():
             if conn not in processed and conn.connected() and conn._sock.pending():
                 self._pending_completion.extend(conn.recv())
-
+    # 判断每个连接中是否有超时的请求，这些请求是通过select发现不了的
     for conn in six.itervalues(self._conns):
         if conn.requests_timed_out():
             log.warning('%s timed out after %s ms. Closing connection.',
@@ -559,4 +561,27 @@ def _poll(self, timeout):
 
     self._maybe_close_oldest_connection()
 ```
-上述函数中对已经注册的`socket`(已经被封装成为`SelectorKey`)进行监听，判断这个`socket`是不是已经可读、可写，获取已经就绪的`socket`对应的`broker connection`，对于那些broker的请求队列为空的情况下(通常是因为对端关闭连接或者协议不同步导致的),关闭连接；同时会更新相关的`broker`的接受数据的时间，方便后续客户端关闭空闲连接。对于每个`broker`的连接，还会判断其发送的请求有没有超时的，如果超时了关闭连接并且将请求队列上的请求设置为超时状态，会新建连接让其重试。最后，会关闭空闲时间比较长的连接。
+上述函数中对已经注册的`socket`(已经被封装成为`SelectorKey`)进行监听，判断这个`socket`是不是已经可读、可写，获取已经就绪的`socket`对应的`broker connection`，对于那些broker的请求队列为空的情况下(通常是因为对端关闭连接或者协议不同步导致的),关闭连接；同时会更新相关的`broker`的连接接受数据的时间，方便后续客户端关闭空闲连接。其中有一个特殊的`socket`为`_wake_r`,其是通过`socketpair`创建的之一，其主要功能是用于`sender`线程和`poll`线程之间进行通信。对于每个`broker`的连接，还会判断其发送的请求有没有超时的，如果超时了关闭连接并且将请求队列上的请求设置为超时状态，会新建连接让其重试。最后，会关闭空闲时间比较长的连接。
+
+上面介绍了从socket中获取数据，下面介绍一个客户端向sokcet中发送数据的函数，对于生产者来说其实只发送两种请求，分别为`MetadataRequset`和`ProdcueRequest`，其最终都是通过调用`KafkaClinet`中的`send`函数实现的：
+```
+def send(self, node_id, request, wakeup=True):
+    conn = self._conns.get(node_id)
+    if not conn or not self._can_send_request(node_id):
+        self.maybe_connect(node_id, wakeup=wakeup)
+        return Future().failure(Errors.NodeNotReadyError(node_id))
+
+    # conn.send will queue the request internally
+    # we will need to call send_pending_requests()
+    # to trigger network I/O
+    future = conn.send(request, blocking=False)
+
+    # Wakeup signal is useful in case another thread is
+    # blocked waiting for incoming network traffic while holding
+    # the client lock in poll().
+    if wakeup:
+        self.wakeup()
+
+    return future
+```
+在通过此函数向一个`broker`发送请求实，首先会判断客户端是不是已经连接上该`broker`或者该发送该broker的请求队列是不是已经是满的了，如果连接不上或者请求队列已经满了，则会进行将该`broker`加入到一个队列中进行排队等待连接，等待在`poll`的时候进行重连，此时，对于请求队列已经满的broker不会进行重连。对于其中的`conn.send(request, blocking=False)`函数，在发送之前会判断与`broker`连接的状态，然后将响应的`request`对象转换成二进制数据放到内存中，再生成一个`correlation_id`，并将`correlation_id`和`future`对象放入到`in_flight_requests`中，以方便在收到`response`之后进行相应的处理。如果`blocking`设置为`True`的情况下，会将刚才提的二进制数据通过`socket`发送出去，如果发送超时会关闭连接,最后是向`socketpair`发送数据，唤醒`poll`线程从而释放锁。
