@@ -69,7 +69,7 @@ C/C++ Volatile关键词前面提到的两个特性，让Volatile经常被解读�
 
 
 
-但是，这个多线程下看似对于C/C++ Volatile关键词完美的应用，实际上却是有大问题的。问题的关键，就在于前面标红的文字：**由于flag = true，那么假设Thread1中的something操作一定已经完成了。** flag == true，为什么能够推断出Thread1中的something一定完成了？其实既然我把这作为一个错误的用例，答案是一目了然的：** 这个推断不能成立，你不能假设看到flag == true后，flag = true;这条语句前面的something一定已经执行完成了。** 这就引出了C/C++ Volatile关键词的第三个特性：顺序性。
+但是，这个多线程下看似对于C/C++ Volatile关键词完美的应用，实际上却是有大问题的。问题的关键，就在于前面标红的文字：**由于flag = true，那么假设Thread1中的something操作一定已经完成了。** flag == true，为什么能够推断出Thread1中的something一定完成了？其实既然我把这作为一个错误的用例，答案是一目了然的：**这个推断不能成立，你不能假设看到flag == true后，flag = true;这条语句前面的something一定已经执行完成了。** 这就引出了C/C++ Volatile关键词的第三个特性：顺序性。
 
 
 
@@ -135,3 +135,5 @@ C/C++ Volatile关键词的第三个特性：**”顺序性”，能够保证Vola
 ## 参考
 
 https://github.com/deepwaterooo/midiController/blob/master/docs/QThread.org
+
+https://www.zhihu.com/question/329746124
