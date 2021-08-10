@@ -1,8 +1,8 @@
 ---
 layout:     post
-title:      "C/C++ Volatile关键词深度剖析"
-subtitle:   "Volatile关键词的三大特性"
-date:       2020-04-14 09:42:30
+title:      "C++类型转换"
+subtitle:   "C++四种类型转换区别"
+date:       2021-08-03 09:42:30
 author:     "zoushengfu"
 header-img: "img/ocean-6519233.jpeg"
 tags:
