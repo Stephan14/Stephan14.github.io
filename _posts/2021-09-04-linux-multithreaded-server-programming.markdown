@@ -67,3 +67,31 @@ shared_ptr作为现成的handle对象，需要避免**循环引用**，通常做
 
 ### 对象池
 当时使用std::bind并且传入this指针时，需要注意该对象是否有可能析构。为了解决这个问题引入enable_shared_from_this, 该类继承enable_shared_from_this并且使用shared_from_this()代替this指针
+
+## 线程同步精要
+
+### 互斥锁
+#### 只使用非递归的mutex
+#### 死锁
+- 单线程死锁：抽象出无锁调用的公共方法
+- 多线程死锁
+
+### 条件变量
+
+对于wait端：
+1. 必须与mutex一起使用，布尔表达式的读写需要mutex保护
+2. 在mutex上锁的时候才能调用wait
+3. 把判断布尔条件和wait()放到while循环中
+
+对于signal/broadcast端：
+1. 不一定要在mutex已上锁的情况下调用signal
+2. 在single之前需要修改布尔表达式
+3. 修改布尔表达式通常需要mutex保护
+4. broadcast表示状态变化，signal表示自愿可用
+
+### 不要使用读写锁和信号量
+见到一个数据读多写少，使用读写锁未必正确：
+1. 在持有read lock的情况下，有可能在维护阶段修改了其中的状态
+2. 从性能角度来看，在read lock加锁阶段的开销不会比mutex lock小，因为其需要维护reade数据
+3. read lock有可能提升为write lock，也有可能不提升
+4. read lock可重入，但是write lock不可重入，为了防止write lock饥饿，write lock会阻塞read lock,导致read lock在重入的时候死锁（旧的read lock没有释放锁，又有write lock存在，导致新的read lock不能加锁）
