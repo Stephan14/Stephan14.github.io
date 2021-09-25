@@ -95,3 +95,49 @@ shared_ptr作为现成的handle对象，需要避免**循环引用**，通常做
 2. 从性能角度来看，在read lock加锁阶段的开销不会比mutex lock小，因为其需要维护reade数据
 3. read lock有可能提升为write lock，也有可能不提升
 4. read lock可重入，但是write lock不可重入，为了防止write lock饥饿，write lock会阻塞read lock,导致read lock在重入的时候死锁（旧的read lock没有释放锁，又有write lock存在，导致新的read lock不能加锁）
+
+信号量存在的问题:
+- semaphore has no notion of ownership
+- 其有自己的计数值，与代码的数据结构冲突，可能出错
+
+### 线程安全的Singleton实现
+```
+template<typename T>
+class Singleton : boost::noncopyable
+{
+
+public:
+    static T& instance()
+    {
+
+        pthread_once(&ponce_, &Singleton::init);//只被初始化一次
+        return *value_;
+    }
+
+private:
+    Singleton();
+    ~Singleton();
+    static void init()
+    {
+
+        value_ = new T();
+    }
+
+    static pthread_once_t ponce_;
+    static T* value_;
+};
+
+template<typename T>
+pthread_once_t Singleton::ponce_ = PTHREAD_ONCE_INIT;
+
+template<typename T>
+T* Singleton<T>::value_ = NULL;
+```
+
+>c++11内存模型
+
+### sleep不是同步原语
+
+生产代码中等待可分为2种：
+1. 等待资源可用，等待select、epoll_wait或者等待条件变量上
+2. 等待进入临界区（等待tmux上）,通常时间比较短
