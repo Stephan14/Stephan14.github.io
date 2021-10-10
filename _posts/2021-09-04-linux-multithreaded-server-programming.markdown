@@ -140,4 +140,9 @@ T* Singleton<T>::value_ = NULL;
 
 生产代码中等待可分为2种：
 1. 等待资源可用，等待select、epoll_wait或者等待条件变量上
-2. 等待进入临界区（等待tmux上）,通常时间比较短
+2. 等待进入临界区（等待mutex上）,通常时间比较短
+
+### 借shared_ptr实现copy-on-write
+
+- 对于write端，进入临界区内之后，如果shared_ptr的引用计数为1，则直接修改；如果引用不为1，则reset shared_ptr并new新的内存空间复制给shared_ptr，最后退出临界区
+- 对于read端，进入临界区内之后，拷贝shared_ptr，退出临界区。在临界区外进行读操作
