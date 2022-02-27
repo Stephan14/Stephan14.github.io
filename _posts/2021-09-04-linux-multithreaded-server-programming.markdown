@@ -314,3 +314,51 @@ class Thread {
 ```
 
 什么时候使用继承?一般是继承boost::noncopyable或者boost::enable_shared_from_this,使用多态代替switch-case以达到简化代码的目的，这个时候数据固定，功能也完全确定（为了接口和实现分离，只会在派生类数据和功能完全固定的情况下使用）
+
+## C++经验谈
+
+### 用异或来交换变量是错误的
+1. 同一份代码在不同的编译平台上编译之后的汇编代码可能不太一样
+2. 代码行数少不一定运行的快
+
+
+### 不要重载全局::operator::new()
+
+#### 内存管理的基本要求
+new/delete要配对
+
+#### 重载::operator::new的理由
+- 检测代码中的内存错误
+- 优化性能
+- 获得内存使用的统计计数
+
+#### ::operator::new的2种重载方式
+
+1. 直接替换系统原有的版本
+```
+#include <new>
+void* operator new(std::size_t size);
+void operator delete(void *ptr);
+```
+
+2. 增加新的参数，调用时也提供额外的参数
+```
+void* operator new(std::size_t size, const char* file, int line);
+void operator delete(void* p,const char* file, int line);
+```
+可以通过如下方式使用
+```
+Foo *p = new(__FILE,__LINE__) Foo;// 跟踪哪个文件哪一行代码分配了内存，一般统计内存使用状况或者检测内存错误会用这种方式
+```
+
+#### 重载operator::new的困境
+
+1. 不要在library里面重载::operator::new()函数，可能会影响使用library的人
+2. 在主程序里面重载用处不大
+
+#### 解决方法：替换malloc
+
+通过LD_PRELOAD加载so，里面有malloc和free的代替实现。
+- 对于”检测内存错误”:可以用valgrind等工具实现
+- 对于“统计内存使用数据”:可以用backtrace来获得函数调用栈
+- 对于”内存优化”:使用tcmalloc护着TBB等内存优化器
