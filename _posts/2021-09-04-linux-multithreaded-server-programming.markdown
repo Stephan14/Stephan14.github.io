@@ -393,3 +393,18 @@ extern "C" int connect(int sockfd, const struct sockaddr *addr, socklen_t addrle
 
 #### 其他做法
 使用ld --warp 替换动态库中的函数
+
+### 慎用匿名namespace
+
+#### C语言static关键字的用法
+1. 用于函数内部修饰变量，表示这种变量的生存周期长于该函数。使用静态变量的函数一般不可重入，也不是线程安全的
+2. 用在文件级别（函数体之外），修饰变量或函数，表示该变量或者函数只有本文件可见，其他文件看不到，也范访问不到改变量或函数
+
+#### C++语言的static关键字的四种用法
+3. 用于修饰class的数据成员，这种数据成员的声明周期大于class的对象。静态成员是每个class一份（class vvariable），普通成员是每个实例有一份（instanc variable）
+4. 用于修饰class的成员函数，只能访问static变量和惊天程序函数，不能访问instanc variable 和method
+
+#### 匿名namespace的不利之处
+
+1. 明确引用哪个匿名函数比较麻烦
+2. 同一个编译器，编译同一个文件，生成的符号表可能不一样
