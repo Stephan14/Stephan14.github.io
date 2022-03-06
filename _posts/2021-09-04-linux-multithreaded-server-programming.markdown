@@ -408,3 +408,18 @@ extern "C" int connect(int sockfd, const struct sockaddr *addr, socklen_t addrle
 
 1. 明确引用哪个匿名函数比较麻烦
 2. 同一个编译器，编译同一个文件，生成的符号表可能不一样
+
+### 采用有利于版本管理的代码格式
+
+#### 对diff友好的代码格式
+- 多行注释也用//,不用 /**/
+- 一行只定义一个变量
+- 如果函数参数大于3个，在逗号后面换行，每个参数占一样
+- 在调用函数时候，如果参数大于3个，把实参分行写
+- class初始化列表也遵循一行一个
+- namespace不设置缩进
+
+
+#### 对grep友好的代码风格
+- 操作符重载
+- static_cast与C-style static_cast
