@@ -401,13 +401,13 @@ extern "C" int connect(int sockfd, const struct sockaddr *addr, socklen_t addrle
 2. 用在文件级别（函数体之外），修饰变量或函数，表示该变量或者函数只有本文件可见，其他文件看不到，也范访问不到改变量或函数
 
 #### C++语言的static关键字的四种用法
-3. 用于修饰class的数据成员，这种数据成员的声明周期大于class的对象。静态成员是每个class一份（class vvariable），普通成员是每个实例有一份（instanc variable）
-4. 用于修饰class的成员函数，只能访问static变量和惊天程序函数，不能访问instanc variable 和method
+3. 用于修饰class的数据成员，这种数据成员的声明周期大于class的对象。静态成员是每个class一份（class variable），普通成员是每个实例有一份（instance variable）
+4. 用于修饰class的成员函数，只能访问static变量和静态程序函数，不能访问instance variable 和methord
 
 #### 匿名namespace的不利之处
 
 1. 明确引用哪个匿名函数比较麻烦
-2. 同一个编译器，编译同一个文件，生成的符号表可能不一样
+2. 同一个编译器，编译同一个文件，每次编译后生成的符号表可能不一样
 
 ### 采用有利于版本管理的代码格式
 
