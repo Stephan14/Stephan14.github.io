@@ -419,7 +419,65 @@ extern "C" int connect(int sockfd, const struct sockaddr *addr, socklen_t addrle
 - class初始化列表也遵循一行一个
 - namespace不设置缩进
 
-
 #### 对grep友好的代码风格
 - 操作符重载
 - static_cast与C-style static_cast
+
+### 再探std::string
+
+string的实现方式:
+- 无特殊处理采用类似std::vector的数据结构
+- 写时复制（COW）
+- 短字符串优化（SSO）,利用string对象本身空间来存储短字符串
+
+以上无论哪种方式都要保存三个数据：1）字符串本身 2）字符串的长度 3）字符串的容量
+
+#### 直接拷贝
+```
+class string {
+public:
+    const_pointer data() const { return start; }
+    iterator begin() { return start; }
+    iterator end() { return end; }
+    size_type size() const { return end - start; }
+    size_type capacity() const() { return end_of_storage - start; }
+private:
+    char* start;
+    char* end;
+    char* end_of_storage;
+};
+```
+内存布局如图
+![](https://res.cloudinary.com/bytedance14/image/upload/v1647060760/blog/wOl8kwwdpz.png)
+
+#### 写时复制
+```
+class string {
+    strcut Rep {
+        size_t size;
+        size_t capacity;
+        size_t refcount;
+        char* data[1];
+    };
+    char* start;
+};
+```
+拷贝字符串的复杂度是O(1),但是第一次operator[]的复杂度是O(n)
+内存布局如图
+![](https://res.cloudinary.com/bytedance14/image/upload/v1647060882/blog/MVjDpCNxJx.png)
+#### 短字符串优化
+```
+class string {
+        char *start;
+        size_t size;
+        static const int kLocalSize = 15;
+        union {
+            char buf[kLocalSize +1];
+            size_t capacity;
+            } data;
+};
+```
+内存布局如图
+![](https://res.cloudinary.com/bytedance14/image/upload/v1647061082/blog/y3dvc3d4Tb.png)
+
+![](https://res.cloudinary.com/bytedance14/image/upload/v1647061091/blog/ftSO7HI0Zs.png)
