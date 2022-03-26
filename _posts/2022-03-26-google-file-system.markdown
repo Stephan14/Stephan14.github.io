@@ -4,7 +4,7 @@ title:      "GFS论文总结"
 subtitle:   "读书笔记"
 date:       2022-03-26 18:18:30
 author:     "zoushengfu"
-header-img: "img/demo2.jpeg"
+header-img: "img/bridge-g3d5aea30b_1920.jpeg"
 tags:
     - 分布式系统
 ---
