@@ -92,7 +92,7 @@ shared_ptr作为现成的handle对象，需要避免**循环引用**，通常做
 ### 不要使用读写锁和信号量
 见到一个数据读多写少，使用读写锁未必正确：
 1. 在持有read lock的情况下，有可能在维护阶段修改了其中的状态
-2. 从性能角度来看，在read lock加锁阶段的开销不会比mutex lock小，因为其需要维护reade数据
+2. 从性能角度来看，在read lock加锁阶段的开销不会比mutex lock小，因为其需要维护reader数据
 3. read lock有可能提升为write lock，也有可能不提升
 4. read lock可重入，但是write lock不可重入，为了防止write lock饥饿，write lock会阻塞read lock,导致read lock在重入的时候死锁（旧的read lock没有释放锁，又有write lock存在，导致新的read lock不能加锁）
 
@@ -246,6 +246,49 @@ Proactor模型可以提高吞吐，但是不能降低延迟
 
 ### 多线程异步日志
 
+## 第七章muduo编程示例
+
+### muduo buffer类的设计与使用
+
+#### muduo的io模型
+
+非阻塞几乎和io多路复用几乎一起使用：
+- 没有人会用通过轮询的方式来检查非阻塞io是否完成，这样太浪费CPU
+- 阻塞io中的read、write、accept和connect会阻塞当前线程
+
+#### 为什么非阻塞网络编程中应用层buffer是必须的
+
+非阻塞io的核心思想是避免阻塞在read或者write上，io线程只能阻塞在io复用多路函数上。
+使用水平触发而没有使用边缘触发的原因：
+- 文件描述符比较少时，poll未必比epoll低效
+- 水平除非更容易编程，以往select和poll经验都可以使用，方便切换
+- 使用水平触发时读写操作不必等到出现EAGAIN,节省系统调用（边缘触发需要一次性的把缓冲区的数据读完为止，也就是一直读，直到读到EGAIN(EGAIN说明缓冲区已经空了)为止，因为这一点，边缘触发需要设置文件句柄为非阻塞）
+
+#### Buffer功能需求
+使用readv代替read系统调用，利用栈上临时空间避免分配过大内存导致内存浪费，同时减少了系统调用。
+>read会从fd当前的offset处开始读，读取完n byte后，该fd的offset会增加n byte（假设可以读取到nbyte），下一次read则从新的offset处开始读。而pread则是从指定的offset处开始读，这个offset是相对于0的一个绝对值，与fd当前的offset没有关系。read和pread的区别就是，read会改变fd的offset，而pread不会改变。
+> pread的实际操作类似于lseek+read，即先将offset调整到指定值，再调用read读取数据，两者的区别在于 pread是一个原子操作，从而可以保证一定是从指定的offset处开始读；另外就是pread读取完数据会恢复执行之前的offset，即pread操作前后的offset是一致的。readv则是从fd中读取数据到多个buf，buf数为iovcnt，每个buf有自己的长度（可以一样），一个buf写满（写指读出数据并保存），才接着写下一个buf，依次类推。
+> preadv与readv的关系，与上述read和pread的关系一样。除了文件 I/O，还有网络 I/O，read/write 也可用于网络 I/O
+
+#### Buffer的数据结构
+
+![](https://res.cloudinary.com/bytedance14/image/upload/v1651503533/%E9%A3%9E%E4%B9%A620220502-225731.jpg)
+
+
+#### Buffer的操作
+内部是一个std::vector<char> 是一个连续内存，还有2个index类型为int。
+> readIndex和wirteIndex为下标而不是指针，因为vector在自动增长扩容时指针会失效
+> vector::resize会调用memset，稍微有点浪费
+
+#### 其他设计方案
+
+##### 不使用std::vector<char>
+![](https://res.cloudinary.com/bytedance14/image/upload/v1651504330/%E9%A3%9E%E4%B9%A620220502-231153.jpg)
+
+##### zero copy
+如果对性能有极高的要求，受不了copy()与resize()，可以考虑实现分断连续的zero copy buffer，在配合gather cattor IO，基本思路是不要求数据在内存中连续。
+
+![](https://res.cloudinary.com/bytedance14/image/upload/v1651504688/blog/%E9%A3%9E%E4%B9%A620220502-231731.jpg)
 
 ## 第九章: 分布式系统工程实践
 
@@ -319,7 +362,7 @@ int main() {
 
 #### 向前声明
 
-为了完成语法检查生成目标代码，编译器需要知道函数的参数个数和类型以及返回值类型，并不需要知道函数体的实现（除非是inline函数）。需要在某个源文件中定义这个函数，斗则会链接错误。如果在定义的时候把函数参数类型写错了，则在生成目标的文件的时候不会报错，但是在链接的时候会报错。
+为了完成语法检查生成目标代码，编译器需要知道函数的参数个数和类型以及返回值类型，并不需要知道函数体的实现（除非是inline函数）。需要在某个源文件中定义这个函数，否则会链接错误。如果在定义的时候把函数参数类型写错了，则在生成目标的文件的时候不会报错，但是在链接的时候会报错。
 
 以下2中情况可以向前声明：
 - 定义或者声明类的指针或者引用，包括用于函数参数、返回类型、局部变量、类型成员变量
