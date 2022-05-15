@@ -288,4 +288,4 @@ Master服务器的所有的checkpoint和操作日志都被复制到多台机器�
 
 ## 参考资料
 
-![后端分布式系列：分布式存储－HDFS与GFS的设计差异](https://blog.csdn.net/mindfloating/article/details/49103611?spm=1001.2014.3001.5502)
+![HDFS与GFS的设计差异](https://blog.csdn.net/mindfloating/article/details/49103611?spm=1001.2014.3001.5502)
