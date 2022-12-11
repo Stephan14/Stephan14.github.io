@@ -20,6 +20,7 @@ void f1(const Widget* pw);
 void f2(Widget const * pw);
 ```
 
+#### const和迭代器
 ```
 std::vector<int> vec;
 
@@ -41,6 +42,7 @@ std::vector<int>::const_iterator citer = vec.begin();
 - 为内置类型对象进行初始化，因为C++不保证初始化它们
 - 构造函数最好使用成员初始化，而不要在构造函数本体内部使用赋值操作；初始化列表的成员变量，其排列次序应该和它们在class中的声明次序有关
 - 为免除“跨编译单元之间的初始化次序”问题，使用local static 对象替换non-local static对象。
+
 ```
 class FileSystem {};
 FileSystem& tfs() {
@@ -58,7 +60,6 @@ Directory& tempDir() {
     static Directory td;
     return td;
 }
-
 ```
 但是上述使用方式在多线程的场景下会有问题，解决方案是在单线程启动的时候手工调用reference-returning函数。
 
