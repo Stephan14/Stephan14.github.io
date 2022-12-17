@@ -1,6 +1,6 @@
 ---
 layout:     post
-title:      "​effective c++ 改善程序与设计的55个具体做法"
+title:      "​Effective C++ 改善程序与设计的55个具体做法"
 subtitle:   "读书笔记"
 date:       2022-12-10 21:42:30
 author:     "邹盛富"
