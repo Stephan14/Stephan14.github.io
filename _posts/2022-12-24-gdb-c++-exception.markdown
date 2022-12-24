@@ -58,6 +58,8 @@ b main
 catch throw
 r
 ```
+> 在程序执行之前，catch throw/catch是无效的，需要在程序执行之后(先在main处设置断点)，使用catch throw才有效
+
 这3个命令来调试，过程如下：
 ```
 ➜  code gdb ./exception
