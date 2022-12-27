@@ -4,7 +4,7 @@ title:      "​C++获取exception栈"
 subtitle:   "使用GDB调试C++进程"
 date:       2022-12-24 17:34:30
 author:     "邹盛富"
-header-img: "img/20221224-173648.jpg"
+header-img: "img/20221227-112544.jpg"
 tags:
     - C/C++
 ---
