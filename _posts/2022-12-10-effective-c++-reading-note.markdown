@@ -108,6 +108,25 @@ base class构造期间virtual函数绝不会下降到derived class阶层，因�
 
 ### 条款15:在资源管理类中提供对原始资源的访问
 
+显式转换函数
+```
+class Font {
+public:
+    FontHandle get() const { return f; }
+};
+```
+
+隐式转换函数
+
+```
+class Font {
+public: 
+    operator FontHandle() const {
+        return f;
+    }
+}
+```
+
 ### 条款16:成对使用new和delete时要采取相同形式
 
 - 尽量对于数组形式不要做typedef动作，避免在new完之后的delete操作出现未定义的行为
@@ -121,5 +140,27 @@ base class构造期间virtual函数绝不会下降到derived class阶层，因�
 - “促进正确使用”的办法包括接口的一致性，以及与内置类型的行为兼容
 - “阻止误用”的办法包括建立新类型，限制类型上的操作，束缚对象值以及消除用户的资源管理责任
 
-### 条款19:
+### 条款19:设计class犹如设计一个type
+
+- 新type的对象应该如何创建和销毁？
+这决定了构造函数和析构函数以及内存分配函数和释放函数的设计
+- 对象的赋值和初始化有什么区别？
+这决定了构造函数和赋值函数之间的得差异
+- 新type的对象如果被以值传递，意味什么？
+拷贝构造函数用来定义以值传递该如何实现
+- 什么是新type的“合法值”？
+成员函数（构造函数、赋值操作等）需要进行必要的错误检查
+- 你的新type需要配合某个继承图系吗？
+如果需要继承某些现有的class，则会受到这些class的影响，比如其virtual和non-virtual函数；如果允许其他的class继承你的type，则需要声明析构函数为virtual
+- 新的type需要什么样的转换？
+如果希望T1被隐式转换为T2类型，就必须在T1中写一个乐行转换函数（operator T2）或者在T2中写一个non-explicit-one-argument的构造函数。也可以参考条款15
+- 什么样的操作符和函数对此type是合理的？
+决定了你的函数声明哪些函数
+- 什么样的标准函数应该被驳回？
+这些函数必须声明为private
+- 谁该取用新type的成员？
+这决定了哪些成员为public，哪些为private，哪些为protected
+- 什么是新type的“未声明接口”？
+- 你的新type有多么的一般化？
+是不是应该定义整个type家族？是不是应该定义一个class template？
 
