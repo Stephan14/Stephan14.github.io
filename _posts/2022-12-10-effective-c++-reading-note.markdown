@@ -164,3 +164,30 @@ public:
 - 你的新type有多么的一般化？
 是不是应该定义整个type家族？是不是应该定义一个class template？
 
+### 条款20:宁以pass-by-reference-to-const替换pass-by-value
+- 尽量以pass-by-reference-to-const替换pass-by-value。前者通常比较高效，可以避免继承时的切割问题
+- 以上不适用内置类型、stl的迭代器和函数对象
+
+### 条款21:必须返回对象时,别妄想返回其reference
+绝不要返回pointer或者reference指向一个local stack对象，或者返回reference指向一个heap-allocated对象，或者返回一个pointer或者reference指向一个local static对象并且同时需要多个这样的对象
+
+### 条款22:将成员变量声明为private
+- 切记将成员变量声明为private，可以保证语法一致性（即所有访问该变量通过函数实现），可以划分访问控制（对该变量提供只读只写的功能）和提供弹性（验证约束条件，多线程同步控制等等）
+- protected并不比public更具有封装性（比如删除一个变量的时候）
+
+### 条款23:宁以non-member、non-friend替换member函数
+越多的东西被封装，我们改变那些东西的能力越大，因为改变对应的代码只影响有限的用户。non-member、non-friend函数的封装性更大一些，因为它并不会增加“能够访问class内之private成分”的函数变量，但是这个论述只适用于non-member、non-friend函数，同时让函数变成non-member并不意味着它不可以是另一个class的member函数（例如一个工具类的static函数）
+
+### 条款24:若所有参数皆需类型转换，请为此采用non-member函数
+如果需要为某个函数的所有参数（包括this指针所指向的那个隐喻参数）进行类型转换，那么这个函数必须是non-member
+
+### 条款25:考虑写出一个不抛出异常的swap函数
+
+当缺省的swap实现的效率不足时，需要做以下事情
+
+- 提供一个public swap成员函数，让它高效置换你的类型的两个对象值
+- 在你的class或者template所在的命名空间内提供一个non-member swap,并令他调用上述成员函数
+- 如果你正在编写一个class(而非 class template)为你的class特化std::swap,并令他调用你的swap成员函数
+- 用户使用的时候，需要using::std以便让std::swap在你函数曝光内可见
+
+> 特化必须在同一命名空间下进行，可以特化类模板也可以特化函数模板，但类模板可以偏特化和全特化，而函数模板只能全特化，但函数允许重载，声明另一个函数模板即可替代偏特化的需要
