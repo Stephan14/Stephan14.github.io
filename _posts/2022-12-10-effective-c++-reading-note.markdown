@@ -176,7 +176,7 @@ public:
 - protected并不比public更具有封装性（比如删除一个变量的时候）
 
 ### 条款23:宁以non-member、non-friend替换member函数
-越多的东西被封装，我们改变那些东西的能力越大，因为改变对应的代码只影响有限的用户。non-member、non-friend函数的封装性更大一些，因为它并不会增加“能够访问class内之private成分”的函数变量，但是这个论述只适用于non-member、non-friend函数，同时让函数变成non-member并不意味着它不可以是另一个class的member函数（例如一个工具类的static函数）
+越多的东西被封装，我们改变那些东西的能力越大，因为改变对应的代码只影响有限的用户。non-member、non-friend函数的封装性更大一些，因为它并不会增加“能够访问class内之private成分”的函数变量，但是这个论述只适用于non-member、non-friend函数，同时让函数变成non-member并不意味着它不可以是另一个class的member函数（例如一个工具类的static函数）同时，namespace和class不同, namespace可以跨越多个源码文件后者并不能. namespace是开放的，和class不同的是你可以在多个文件里面象同一个namespace里面添加东西，获得更少的编译依赖和增加扩展性。
 
 ### 条款24:若所有参数皆需类型转换，请为此采用non-member函数
 如果需要为某个函数的所有参数（包括this指针所指向的那个隐喻参数）进行类型转换，那么这个函数必须是non-member
