@@ -234,3 +234,66 @@ inline是将“对此函数的每一个调用”都以函数本体替换，这�
 3. 为声明式和定义式提供不同的头文件
 
 基于上述思想，提供2种手段分别是*Handle class* 和*Interface class*
+
+## 定制new和delete
+
+### 条款49:了解new-handler的行为
+
+
+一个设计良好的new-handler函数必须做以下几件事情：
+- 让更多的内存可用
+- 安装另一个new-handler
+- 卸除new-handler
+- 抛出bad_alloc
+- 不返回，调用abort或者exit 
+
+
+为单独的类定制自己的operator new操作
+```
+#include <iostream>
+#include <new>
+
+class NewHandlerHolder {
+    public:
+        explicit NewHandlerHolder(std::new_handler handler) {}
+        ~NewHandlerHolder() {
+            std::set_new_handler(handler);
+        }
+
+        NewHandlerHolder(const NewHandlerHolder& p)  = delete;
+        NewHandlerHolder& operator=(const NewHandlerHolder& p) = delete;
+    private:
+        std::new_handler handler;
+
+};
+
+template<typename T> //模版保证每个子类的current_handler不是全局共享的
+class NewHandlerSupport{
+    public:
+       static std::new_handler set_new_handler(std::new_handler) throw();
+       static void* operator new(std::size_t size) throw(std::bad_alloc);
+    private:
+       static std::new_handler current_handler;
+};
+
+template<typename T>
+std::new_handler
+NewHandlerSupport<T>::set_new_handler(std::new_handler p) throw() {
+    std::new_handler old_handler = current_handler;
+    current_handler = p;
+    return old_handler;
+}
+
+template<typename T>
+void*
+NewHandlerSupport<T>::operator new(std::size_t n) throw(std::bad_alloc) {
+    NewHandlerHolder holder(std::set_new_handler(current_handler));
+    return ::operator new(n);
+}
+
+template<typename T>
+std::new_handler NewHandlerHolder<T>::current_handler = 0;
+
+
+class Weight: public  NewHandlerSupport<Weight> {}
+```
