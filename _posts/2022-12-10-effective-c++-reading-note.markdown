@@ -355,3 +355,64 @@ Derived* p = new Derived; //这里调用的是Base的operator new
 
 - operator new应该内含一个无穷循环,并在其中尝试分配内在,如果它无法满足内存需求,就该调用new-handler，并且它也应该有能力处理0bytes申请。Class专属版本则还应该处理"比正确大小更大的(错误)申请"
 - operator delete应该在收到null指针时不做任何事。Class专属版本则还应该处理"比正确大小更大的(错误)申请"。
+
+
+### 条款52:写了placement new也要写placement delete
+
+**如果内存分配成功,而widget构造函数抛出异常**,运行系统有责任取消operator new的分配并恢复旧观,然而运行期系统无法知道真正被调用的那个operator new如何运作,取而代之的是运行期系统寻找"参数个数和类型都与operator new相同"的某个operator delete,如果找到那就是它的调用对象，否则造成内存泄漏。所以代码如下：
+
+```
+class Widget {
+    public:
+        static void* operator new(std::size_t size, std::ostream& log_stream) throw(std:::bad_alloc);
+        static void operator delete(void* raw_memory) throw();
+        static void operator delete(void* raw_memory, std::ostream& log_stream) throw();
+};
+
+Widget* w = new (std::cerr) Widget;
+
+Widget* w = new  Widget; //错误：因为正常的operator new被掩盖了
+
+delete w; // 调用正常的operator delete,因此需要实现operator delete(void* raw_memory)，否则会造成内存泄漏
+```
+同样道理,derived classes中的operatornews会掩盖global版本和继承而得的operator new版本
+```
+class Derived::public Widget {
+    public:
+        static void* operator new(std::size_t size) throw(std::bad_alloc);
+};
+
+Derived* d = new (std::clog) Derived; //错误：因为父类的placement new被覆盖了
+
+Derived* d = new  Derived;
+```
+
+最终建立一个Base类实现所有的new操作
+
+```
+class StandardNewDeleteForms {
+    public:
+    // normalnew/delete
+    static void* operator new(std::size_t size) throw(std::bad_alloc)(return::operatornew(size);}
+    static void operator delete (void pMemory) throw() {::operatordelete(pMemory);}
+
+    // placement new/delete
+    static void operator new(std::size_t size, void ptr) throw() (return ::operator new(size,ptr);}
+    static void operator delete (void pMemory, void ptcr) throw(){return::operatordelete(pMemory,ptr); ptr);}
+
+    // nothrow new/delete
+    static void operator new (std::size_t size, const std::nothrow_throw(){return ::operator new(size,nt);}
+    static void operator delete(void *pMemory, const std::nothrow_ta)throw()(::operator delete(pMemory);
+};
+
+class Widget:public StandardNewDeleteForms {//继承标准形式
+    public:
+    using StandardNewDeleteForms::operator new;//让这些形式可见
+    using StandardNewDeleteForms::operator delete
+    static void operator new(std::size t size t size, std::ostream& logStream) throw(std::bad_alloc);//添加一个自定的 placement new 
+   
+    static void operator delete(void·pMemory,std::ostream& logStream)
+    throw();  //添加一个对应的placement delete
+}; 
+
+```
