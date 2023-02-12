@@ -297,3 +297,20 @@ std::new_handler NewHandlerHolder<T>::current_handler = 0;
 
 class Weight: public  NewHandlerSupport<Weight> {}
 ```
+
+### 了解new和delete的合理替换时机
+重写new和delete的原因：
+- 用来检测运行的错误:重写new函数当分配内存时在内存的开始或者结尾处增加特定的byte，当delete的时候判断这些标记是不是原封不动
+- 为了强化效能:可以优化内存碎片问题
+- 为了收集使用上的内存数据:
+
+> C++要求所有operator new返回的指针都有适当的对齐（取决于数据类型），malloc的返回值符合这种要求，所以一般要求operator new返回malloc的返回值
+
+何时可以替换“全局的”或者“class专属的” new和delete操作：
+- 为了检测运用错误
+- 收集动态内存的使用统计信息
+- 为了增加分配和归还的速度
+- 为了降低缺省的内存管理器带来的空间的额外开销
+- 为了弥补缺省的内存分配器中的非最佳内存对齐：内存对齐能保证访问性能提高
+- 为了将相关对象成簇集中：某些数据结构同时被访问，减少page faults
+- 为了获得非传统的行为
