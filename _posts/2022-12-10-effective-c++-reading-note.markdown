@@ -314,3 +314,44 @@ class Weight: public  NewHandlerSupport<Weight> {}
 - 为了弥补缺省的内存分配器中的非最佳内存对齐：内存对齐能保证访问性能提高
 - 为了将相关对象成簇集中：某些数据结构同时被访问，减少page faults
 - 为了获得非传统的行为
+
+### 编写new和delete时需固守常规
+
+operator new成员函数会被derived class继承，一旦被继承下去，有可能base class的operator new被调用用以分配derived class对象的内存。 
+
+> 当你实现operator new[]操作时，你不能假设array的元素的对象的个数是（bytes申请数）/sizeof(Base)，传递给operator new[]的size_t参数，其值可能比“将被填以对象”的内存数量更多，因为动态分配的arrays可能包含额外空间用来存放元素个数
+
+```
+#include <exception>
+#include <iostream>
+
+class Base {
+    public:
+        static void* operator new(std::size_t size) throw(std::bad_alloc) {
+            if (size != sizeof(Base)) { //如果子类调用new直接使用缺省的new操作
+                return operator new(size);
+            }
+            //
+            return nullptr;
+        }
+
+        static void operator delete(void* raw_memory, std::size_t size) throw() {
+            if (size ==0) { return; }
+            if (size != sizeof(Base)) {
+                ::operator delete(raw_memory, size);
+                return;
+            }
+            return;
+        }
+};
+
+class Derived: public Base {
+};
+
+
+Derived* p = new Derived; //这里调用的是Base的operator new
+```
+如果即将被删除的对象派生自某个base class而后者欠缺virtual析构函数，那么传给operatr delete的size参数可能不正确，所以建议base class的虚构函数为virtual
+
+- operator new应该内含一个无穷循环,并在其中尝试分配内在,如果它无法满足内存需求,就该调用new-handler，并且它也应该有能力处理0bytes申请。Class专属版本则还应该处理"比正确大小更大的(错误)申请"
+- operator delete应该在收到null指针时不做任何事。Class专属版本则还应该处理"比正确大小更大的(错误)申请"。
