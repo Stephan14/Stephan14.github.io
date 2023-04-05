@@ -241,6 +241,81 @@ inline是将“对此函数的每一个调用”都以函数本体替换，这�
 
 pubilc继承主张，能够施行于base class对象身上的**每件事情**都能可以施行derived class对象身上，因为每一个derived class对象也都是一个base class对象
 
+### 条款33:避免遮掩继承而来的名称
+
+```
+class Base {
+    private:
+        int x;
+    public:
+        virtual void mf1() = 0;
+        virtual void mf1(int);
+        virtual void mf2();
+        void mf3();
+        void mf3(double);
+        ...
+};
+
+class Derived: public Base {
+    public:
+        virtual void mf1();
+        void mf3();
+        void mf4();
+        ...
+};
+```
+调用情况如下：
+```
+Derived d;
+int x;
+...
+d.mf1(); // 正确，调用Derived::mf1
+d.mf1(x); // 错误，因为Derived::mf1遮掩了Base::mf1
+d.mf2(); // 正确，调用了Base::mf2
+d.mf3(); // 正确，调用了Derived::mf3
+d.mf3(x); // 错误，Derived::mf3遮掩了Base::mf3
+```
+
+如果我们想要避免这样的遮掩呢，换句话说，调用父类的方法，这时候可以使用using:
+```
+class Base {
+    private:
+        int x;
+    public:
+        virtual void mf1() = 0;
+        virtual void mf1(int);
+        virtual void mf2();
+        void mf3();
+        void mf3(double);
+        ...
+};
+
+class Derived: public Base {
+    public:
+        using Base::mf1;  // 让Base class内名为mf1和mf3的所有东西在Derived作用域内都可见
+        using Base::mf3;
+        virtual void mf1();
+        void mf3();
+        void mf4();
+        ...
+};
+```
+调用结果如下：
+```
+Derived d;
+int x;
+...
+d.mf1(); // 正确，调用Derived::mf1
+d.mf1(x); // 正确，调用Base::mf1
+d.mf2(); // 正确，调用了Base::mf2
+d.mf3(); // 正确，调用了Derived::mf3
+d.mf3(x); // 正确，调用Base::mf3
+```
+
+
+- derived class内的名称会遮掩base classes内的名称，在public继承下从来没有人会希望如此
+- 为了让被遮掩的名称重见天日，可以使用using声明式或者转交函数（forwarding functions）
+
 
 ## 定制new和delete
 
