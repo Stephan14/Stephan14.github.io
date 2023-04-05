@@ -235,6 +235,13 @@ inline是将“对此函数的每一个调用”都以函数本体替换，这�
 
 基于上述思想，提供2种手段分别是*Handle class* 和*Interface class*
 
+## 继承与面向对象设计
+
+### 条款32:确定你的public继承塑模出is-a关系
+
+pubilc继承主张，能够施行于base class对象身上的**每件事情**都能可以施行derived class对象身上，因为每一个derived class对象也都是一个base class对象
+
+
 ## 定制new和delete
 
 ### 条款49:了解new-handler的行为
