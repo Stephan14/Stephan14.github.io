@@ -316,6 +316,46 @@ d.mf3(x); // 正确，调用Base::mf3
 - derived class内的名称会遮掩base classes内的名称，在public继承下从来没有人会希望如此
 - 为了让被遮掩的名称重见天日，可以使用using声明式或者转交函数（forwarding functions）
 
+### 条款34:区分接口继承和实现继承
+public继承意味着is-a关系，表示某个函数可施行于某个class身上，一定也可以施行于derived class身上。
+- 声明一个pure virtual函数的目的是为了让derived class只继承函数接口。告诉derived class必须提供这个pure virtual函数，base class不干扰你的实现。同时pure virtual函数必须在derived classes中重新声明，但它们也可以拥有自己的实现。
+- 声明一个impure virtual函数的目的是让derived classes继承该函数的接口和缺省实现。 但是可能导致新增的derived class默认使用不正确的base class的实现，解决方式如下：
+
+```
+class Airplane {
+public:
+    virtual void fly (const Airport& destination) = 0;
+};
+
+void Airplane::fly(const Airport&destination) //pure virtual函数实现 
+{
+    //缺省行为，将 飞机 飞至指定的目的地
+}
+
+class ModelA: public Airplane { 
+public:
+    virtual void fly(const Airport& destination) { 
+        Airplane::fly(destination); 
+    }
+};
+
+class ModelB: public Airplane {
+public:
+    virtual void fly(const Airport& destination) {
+        Airplane::fly(destination); 
+    }
+};
+
+class ModelC: public Airplane {
+public:
+    virtual void fly (const Airport& destination);
+};
+
+void ModelC::fly(const Airport& destination) {
+
+}
+```
+- 声明一个non-virtual函数意味所有derived class都继承函数的接口以及一份强制复制，并不打算在不同的derived class有不同的实现
 
 ## 定制new和delete
 
