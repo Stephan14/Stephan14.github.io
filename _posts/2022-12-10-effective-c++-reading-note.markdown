@@ -383,6 +383,24 @@ private:
 #### 古典的Strategy模式
 將继承体系内的virtual函数替换为另一个继承体系内的virtual函数
 
+### 条款36:绝不重新定义继承而来的non-virtual函数
+
+```
+class B { 
+public:
+    void mf(); 
+};
+
+class D: public B (
+public:
+    void mf(); //遮掩(hides)了B::mf
+};
+
+pB->mf(); //调用B::mf
+pD->mf(); //调用D::mf
+
+```
+
 ## 定制new和delete
 
 ### 条款49:了解new-handler的行为
