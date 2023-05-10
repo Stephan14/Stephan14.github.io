@@ -348,7 +348,7 @@ public:
 
 class ModelC: public Airplane {
 public:
-    virtual void fly (const Airport& destination);
+    virtual void fly(const Airport& destination);
 };
 
 void ModelC::fly(const Airport& destination) {
@@ -356,6 +356,32 @@ void ModelC::fly(const Airport& destination) {
 }
 ```
 - 声明一个non-virtual函数意味所有derived class都继承函数的接口以及一份强制复制，并不打算在不同的derived class有不同的实现
+
+### 条款35:考虑virtual函数以外的其他选择
+
+#### 藉由Non-VirtualInterface手法实现Template Method模式
+它以 public non-virtual 成员函数包裹较低访问性(private或protected)的virtual函数。
+
+```
+class GameCharacter {
+public:
+    int healthvalue const;
+    int retVal = doHealthValue();
+    return retVal;
+private:
+    virtual int doHealthValue () const
+};
+```
+通过public non-virtual成员函数间接调用private virtual函数，称为non-virtual interface(NVI)手法。它是所谓Template Method设计模式(与C++templates 并无关联)的一个独特表现形式。我把这个non-virtual函数称为virtual函数的外覆器(wrapper)
+
+#### 藉由Function Pointers实现Strategy模式
+将virtual函数替换为“函数指针成员变量”,这是Strategy设计模式的一种分解表现形式
+
+#### 藉由tr1:function完成Strategy模式
+以tr1::function成员变量替换virtual函数，因而允许使用任何可调用物(callable entity)搭配一个兼容于需求的签名式
+
+#### 古典的Strategy模式
+將继承体系内的virtual函数替换为另一个继承体系内的virtual函数
 
 ## 定制new和delete
 
