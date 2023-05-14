@@ -420,9 +420,12 @@ Shape* pr = new Rectangle; //静态类型为Shape*
 - 编译器不会将一个derived class对象转换为base class 对象
 - 由private base class继承而来的所有成员，在derived class中都会变成private属性，纵使它们在base class中原本是protected或public属性
 
-当你面对“并不存在is-a关系”的两个classes，其中一个需要访问另一个的protected成员，或需要重新定义其一或多个virtual函数，private继承极有可能成为正统设计策略。即便如此你也己经看到， 一个混合了public继承和复合的设计，往往能够释出你要的行为，尽管这样的设计有较大的复杂度。
+当你面对“并不存在is-a关系”的两个classes，其中一个需要访问另一个的protected成员，或需要重新定义其一或多个virtual函数，private继承极有可能成为正统设计策略。即便如此你也己经看到，一个混合了public继承和复合的设计，往往能够释出你要的行为，尽管这样的设计有较大的复杂度。
 
 ### 条款40:明智而审慎地使用多重继承
+- 多重继承比单一继承复杂。它可能导致新的歧义性，以及对virtual继承的需要。
+- virtual 继承会增加大小、速度、初始化(及赋值)复杂度等等成本。如果virtual base classes 不带任何数据，将是最具实用价值的情况。
+- 多重继承的确有正当用途。其中 一个情节涉及“public继承某个Interfaceclass” 和“pri vate 继承某个协助实现的class ” 的两相组合。
 
 ## 定制new和delete
 
