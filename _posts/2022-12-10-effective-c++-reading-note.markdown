@@ -412,6 +412,18 @@ Shape* pr = new Rectangle; //静态类型为Shape*
 本例中ps, pc和pr都被声明为pointer-to-Shape类型，所以它们都以它为静态类型。注意，不论它们真正指向什么，它们的静态类型都是Shape*。对象的所谓动态类型则是指“目前所指对象的类型” 。也就是说，动态类型可以表现出一个对象将会有什么行为。以上例而言，pc的动态类型是Circle*，pr 的动态类型是Rectangle*。ps没有动态类型，因为它尚末指向任何对象。
 
 绝对不要重新定义一个继承而来的缺省參数值，因为缺省参数值都是静态鄉定，而virtual函数--你唯一应该覆写的东西--却是动态绑定
+
+### 条款38:通过复合塑模出has-a或“根据某物实现出”
+
+### 条款39:明智而审慎地使用private继承
+如果class之间继承关系是private，那么：
+- 编译器不会将一个derived class对象转换为base class 对象
+- 由private base class继承而来的所有成员，在derived class中都会变成private属性，纵使它们在base class中原本是protected或public属性
+
+当你面对“并不存在is-a关系”的两个classes，其中一个需要访问另一个的protected成员，或需要重新定义其一或多个virtual函数，private继承极有可能成为正统设计策略。即便如此你也己经看到， 一个混合了public继承和复合的设计，往往能够释出你要的行为，尽管这样的设计有较大的复杂度。
+
+### 条款40:明智而审慎地使用多重继承
+
 ## 定制new和delete
 
 ### 条款49:了解new-handler的行为
