@@ -45,6 +45,21 @@ public interface ConsistentCore {
 1. 追随者发现自己和领导者之间滞后的数据量比较大时，会返回一个错误给client，client收到此错误的时候会自动连领导者进行读取
 2. 每条数据写入时会生成对应的版本戳，这个版本戳可以是高水位标记（High-Water Mark）或是混合时钟（Hybrid Clock）。然后，如果客户端希望稍后读取该值的话，它就把这个版本戳当做读取请求的一部分。如果读取请求到了追随者那里，它就会检查其存储的值，看它是等于或晚于请求的版本戳。如果不是，它就会等待，直到有了最新的版本，再返回该值。通过这种做法，这个客户端总会读取与它写入一直的值——这种做法通常称为“读自己写”的一致性。
 
+## Lamport 时钟（Lamport Clock）
+
+### 问题
+当值要在多个服务器上进行存储时，需要有一种方式知道一个值要在另外一个值之前存储。在这种情况下，不能使用系统时间戳，因为时钟不是单调的，两个服务器的时钟时间不应该进行比较。
+
+### 解决方案
+
+每个集群节点都维护着一个 Lamport 时钟的实例,服务器每当进行任何写操作时，服务器都应该让 Lamport 时钟前进。如此一来，服务器可以确保写操作的顺序是在这个请求之后，以及客户端发起请求时服务器端已经执行的任何其他动作之后。服务器会返回一个时间戳，用于将值写回给客户端。稍后，请求的客户端会使用这个时间戳向其它的服务器发起进一步的写操作。如此一来，请求的因果链就得到了维持。*但是只能保证部分有序，对于在不同server上的数据无法比较*
+![](https://github.com/dreamhead/patterns-of-distributed-systems/blob/master/image/lamport-clock-request-sequence.png)
+
+#### 单一服务器/领导者更新值
+只有领导者负责递增版本计数器，追随者使用相同的版本号。
+![](https://github.com/dreamhead/patterns-of-distributed-systems/blob/master/image/single-servergroup-kvstore.png)
+
+
 ## 幂等接收者（Idempotent Receiver）
 
 ### 问题
