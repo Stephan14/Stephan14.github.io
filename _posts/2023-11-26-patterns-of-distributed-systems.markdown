@@ -52,12 +52,48 @@ public interface ConsistentCore {
 
 ### 解决方案
 
+```
+class LamportClock…
+
+public int tick(int requestTime) {
+    latestTime = Integer.max(latestTime, requestTime);
+    latestTime++;
+    return latestTime;
+}
+
+class Server…
+
+public int write(String key, String value, int requestTimestamp) {
+    //update own clock to reflect causality
+    int writeAtTimestamp = clock.tick(requestTimestamp);
+    mvccStore.put(new VersionedKey(key, writeAtTimestamp), value);
+    return writeAtTimestamp;
+}
+```
+用于写入值的时间戳会返回给客户端。通过更新自己的时间戳，客户端会跟踪最大的时间戳。它在发出进一步写入请求时会使用这个时间戳。
+
+```
+class Client…
+
+LamportClock clock = new LamportClock(1);
+public void write() {
+    int server1WrittenAt = server1.write("name", "Alice", clock.getLatestTime());
+    clock.updateTo(server1WrittenAt);
+
+    int server2WrittenAt = server2.write("title", "Microservices", clock.getLatestTime());
+    clock.updateTo(server2WrittenAt);
+
+    assertTrue(server2WrittenAt > server1WrittenAt);
+}
+
+```
+
 每个集群节点都维护着一个 Lamport 时钟的实例,服务器每当进行任何写操作时，服务器都应该让 Lamport 时钟前进。如此一来，服务器可以确保写操作的顺序是在这个请求之后，以及客户端发起请求时服务器端已经执行的任何其他动作之后。服务器会返回一个时间戳，用于将值写回给客户端。稍后，请求的客户端会使用这个时间戳向其它的服务器发起进一步的写操作。如此一来，请求的因果链就得到了维持。*但是只能保证部分有序，对于在不同server上的数据无法比较*
-![](https://github.com/dreamhead/patterns-of-distributed-systems/blob/master/image/lamport-clock-request-sequence.png)
+![执行顺序](https://github.com/dreamhead/patterns-of-distributed-systems/blob/master/image/lamport-clock-request-sequence.png)
 
 #### 单一服务器/领导者更新值
 只有领导者负责递增版本计数器，追随者使用相同的版本号。
-![](https://github.com/dreamhead/patterns-of-distributed-systems/blob/master/image/single-servergroup-kvstore.png)
+![执行顺序](https://github.com/dreamhead/patterns-of-distributed-systems/blob/master/image/single-servergroup-kvstore.png)
 
 ##  
 
