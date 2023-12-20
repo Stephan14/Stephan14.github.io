@@ -3,7 +3,7 @@ layout:     post
 title:      "分布式系统模式"
 subtitle:   "读书笔记"
 date:       2023-11-26 15:35:30
-author:     "zoushengfu"
+author:     "邹盛富"
 header-img: "img/weary-8375125.jpg"
 tags:
     - 分布式系统
@@ -59,6 +59,13 @@ public interface ConsistentCore {
 只有领导者负责递增版本计数器，追随者使用相同的版本号。
 ![](https://github.com/dreamhead/patterns-of-distributed-systems/blob/master/image/single-servergroup-kvstore.png)
 
+##  
+
+### 问题
+
+### 解决方案
+
+
 
 ## 幂等接收者（Idempotent Receiver）
 
@@ -70,5 +77,5 @@ public interface ConsistentCore {
 2. 服务器会为每个client创建一个session，保存对应client的请求信息
 3. 对于过期的请求, 1)保存处理成功的最大的请求ID，该ID也会转发给其他的服务器，小于该ID的请求都丢掉 2)如果client侧能保证收到上一个请求的response之后才能发送下一个request，则服务器一旦收到这个client的请求可以丢掉之前的所有请求
 
-### 参考资料
+## 参考资料
 https://github.com/dreamhead/patterns-of-distributed-systems/tree/master
