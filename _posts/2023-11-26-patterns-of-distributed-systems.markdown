@@ -128,16 +128,39 @@ public void write() {
 - 心跳的实现，如果没有从选举节点收到心跳，将键值做过期处理，以便触发新的选举
 - 通知机制，如果一个键值过期，就通知所有感兴趣的服务器
 
-
-
-
-
 ## 世代时钟（Generation Clock）
 
 ### 问题
 
+集群余下的部分要能检测出有的请求是来自原有的领导者。原有的领导者本身也要能检测出，它是临时从集群中断开了，然后，采用必要的修正动作，交出领导权。
 
 ### 解决方案
+
+维护一个单调递增的数字，表示服务器的世代。每次选出新的领导者，这个世代都应该递增。即便服务器重启，这个世代也应该是可用的，因此，它应该存储在预写日志（Write-Ahead Log）每一个条目里
+
+采用领导者和追随者（Leader and Followers）模式，选举新的领导者选举时，服务器对这个世代的值进行递增。
+
+```
+class ReplicationModule…
+private void startLeaderElection() {
+      replicationState.setGeneration(replicationState.getGeneration() + 1);
+      registerSelfVote();
+      requestVoteFrom(followers);
+}
+```
+
+服务器会把世代当做投票请求的一部分发给其它服务器。在这种方式下，经过了成功的领导者选举之后，所有的服务器都有了相同的世代。一旦选出新的领导者，追随者就会被告知新的世代。
+
+```
+follower
+class ReplicationModule
+private void becomeFollower(int leaderId, Long generation) {
+      replicationState.setGeneration(generation);
+      replicationState.setLeaderId(leaderId);
+      transitionTo(ServerRole.FOLLOWING);
+}
+```
+自此之后，领导者会在它发给追随者的每个请求中都包含这个世代信息。它也包含在发给追随者的每个心跳（HeartBeat）消息里，也包含在复制请求中。领导者也会把世代信息持久化到预写日志（Write-Ahead Log）的每一个条目里,如果追随者得到了一个来自已罢免领导的消息，追随者就可以告知其世代过低。当领导者得到了一个失败的应答，它就会变成追随者，期待与新的领导者建立通信。
 
 
 ## 幂等接收者（Idempotent Receiver）
