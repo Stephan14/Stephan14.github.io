@@ -89,18 +89,55 @@ public void write() {
 ```
 
 每个集群节点都维护着一个 Lamport 时钟的实例,服务器每当进行任何写操作时，服务器都应该让 Lamport 时钟前进。如此一来，服务器可以确保写操作的顺序是在这个请求之后，以及客户端发起请求时服务器端已经执行的任何其他动作之后。服务器会返回一个时间戳，用于将值写回给客户端。稍后，请求的客户端会使用这个时间戳向其它的服务器发起进一步的写操作。如此一来，请求的因果链就得到了维持。*但是只能保证部分有序，对于在不同server上的数据无法比较*
-![执行顺序](https://github.com/dreamhead/patterns-of-distributed-systems/blob/master/image/lamport-clock-request-sequence.png)
+
+![例子](https://res.cloudinary.com/bytedance14/image/upload/v1703663232/tpigriulylzm7btnrzju.png)
 
 #### 单一服务器/领导者更新值
 只有领导者负责递增版本计数器，追随者使用相同的版本号。
-![执行顺序](https://github.com/dreamhead/patterns-of-distributed-systems/blob/master/image/single-servergroup-kvstore.png)
 
-##  
+![例子](https://res.cloudinary.com/bytedance14/image/upload/v1703663556/mumemrdk5ozfows1siau.png)
+
+## 领导者和追随者（Leader and Followers）
 
 ### 问题
 
+当数据在多个服务器上更新时，需要决定何时让客户端看到这些数据。只有写读的Quorum是不够的，因为一些失效的场景会导致客户端看到不一致的数据。单个的服务器并不知道Quorum上其它服务器的数据状态，只有数据是从多台服务器上读取时，才能解决不一致的问题。在某些情况下，这还不够。发送给客户端的数据需要有更强的保证。
+
 ### 解决方案
 
+在集群里选出一台服务器成为领导者。领导者负责根据整个集群的行为作出决策，并将决策传给其它所有的服务器。
+
+
+#### 领导者选举
+
+只有“最新”的服务器才能成为合法的领导者。比如说，在典型的基于共识的系统中，“最新”由两件事定义：
+
+    - 最新的世代时钟（Generation Clock）
+    - 预写日志（Write-Ahead Log）的最新日志索引
+
+如果所有的服务器都是最新的，领导者可以根据下面的标准来选：
+
+    - 一些实现特定的标准，比如，哪个服务器评级为更好或有更高的 ID（比如，Zab）
+    - 如果要保证注意每台服务器一次只投一票，就看哪台服务器先于其它服务器启动选举
+
+##### 使用外部[线性化]的存储进行领导者选举
+
+在一个数据集群内运行领导者选举，对小集群来说，效果很好。但对那些有数千个节点的大数据集群来说，使用外部存储会更容易一些，比如 Zookeeper 或 etcd （其内部使用了共识，提供了线性化保证）。实现领导者选举要有三个功能：
+
+- compareAndSwap 指令，能够原子化地设置一个键值
+- 心跳的实现，如果没有从选举节点收到心跳，将键值做过期处理，以便触发新的选举
+- 通知机制，如果一个键值过期，就通知所有感兴趣的服务器
+
+
+
+
+
+## 世代时钟（Generation Clock）
+
+### 问题
+
+
+### 解决方案
 
 
 ## 幂等接收者（Idempotent Receiver）
