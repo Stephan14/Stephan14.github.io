@@ -216,6 +216,61 @@ public class HybridTimestamp implements Comparable<HybridTimestamp> {
     }
 
 }
+
+public synchronized HybridTimestamp now() {
+     long currentTimeMillis = systemClock.currentTimeMillis();
+     if (latestTime.getWallClockTime() >= currentTimeMillis) {
+            //检查系统时间值是否在往回走，如果是，则递增另一个代表组件逻辑部分的数字，以反映时钟的进展。
+          latestTime = latestTime.addTicks(1);
+     } else {
+         latestTime = new HybridTimestamp(currentTimeMillis, 0);
+     }
+     return latestTime;
+}
+
+```
+
+服务器从客户端收到的每个写请求都会带有一个时间戳。接收的服务器会将自己的时间戳与请求的时间戳进行比较，将二者中较高的一个设置为自己的时间戳。
+
+```
+public HybridTimestamp write(String key, String value, HybridTimestamp requestTimestamp) {
+      //update own clock to reflect causality
+      HybridTimestamp writeAtTimestamp = clock.tick(requestTimestamp);
+      mvccStore.put(key, writeAtTimestamp, value);
+      return writeAtTimestamp;
+}
+
+class HybridClock…
+
+public synchronized HybridTimestamp tick(HybridTimestamp requestTime) {
+    long nowMillis = systemClock.currentTimeMillis();
+    //set ticks to -1, so that, if this is the max, the next addTicks reset it to zero.
+    HybridTimestamp now = HybridTimestamp.fromSystemTime(nowMillis);
+    latestTime = max(now, requestTime, latestTime);
+    latestTime = latestTime.addTicks(1);
+    return latestTime;
+}
+
+private HybridTimestamp max(HybridTimestamp ...times) {
+    HybridTimestamp maxTime = times[0];
+    for (int i = 1; i < times.length; i++) {
+        maxTime = maxTime.max(times[i]);
+    }
+    return maxTime;
+}
+```
+用于写入值的时间戳会返回给客户端。请求的客户端会更新自己的时间戳，然后，在发起进一步的写入时会带上这个时间戳。
+```
+HybridClock clock = new HybridClock(new SystemClock());
+
+public void write() {
+    HybridTimestamp server1WrittenAt = server1.write("key1", "value1", clock.now());
+    clock.tick(server1WrittenAt);
+
+    HybridTimestamp server2WrittenAt = server2.write("key2", "value2", clock.now());
+
+    assertTrue(server2WrittenAt.compareTo(server1WrittenAt) > 0);
+}
 ```
 
 ## 幂等接收者（Idempotent Receiver）
