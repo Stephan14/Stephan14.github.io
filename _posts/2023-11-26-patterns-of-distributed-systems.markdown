@@ -162,6 +162,61 @@ private void becomeFollower(int leaderId, Long generation) {
 ```
 自此之后，领导者会在它发给追随者的每个请求中都包含这个世代信息。它也包含在发给追随者的每个心跳（HeartBeat）消息里，也包含在复制请求中。领导者也会把世代信息持久化到预写日志（Write-Ahead Log）的每一个条目里,如果追随者得到了一个来自已罢免领导的消息，追随者就可以告知其世代过低。当领导者得到了一个失败的应答，它就会变成追随者，期待与新的领导者建立通信。
 
+## 混合时钟
+
+### 问题
+
+采用有版本的值（Versioned Value）时，如果用 Lamport 时钟当做版本，存储版本时，客户端并不知道实际的日期-时间。对于客户端而言，有时需要能够访问到像 01-01-2020 这样采用日期-时间的版本，而不仅仅是像 1、2、3 这样的整数。
+
+### 解决方案
+
+混合时间戳里维护了最新的时间，这个时间戳使用系统时间和整数计数器共同构建
+
+```
+class HybridTimestamp…
+
+public class HybridTimestamp implements Comparable<HybridTimestamp> {
+    private final long wallClockTime;
+    private final int ticks;
+
+    public HybridTimestamp(long systemTime, int ticks) {
+        this.wallClockTime = systemTime;
+        this.ticks = ticks;
+    }
+
+    public static HybridTimestamp fromSystemTime(long systemTime) {
+        return new HybridTimestamp(systemTime, -1); //initializing with -1 so that addTicks resets it to 0
+    }
+
+    public HybridTimestamp max(HybridTimestamp other) {
+        if (this.getWallClockTime() == other.getWallClockTime()) {
+            return this.getTicks() > other.getTicks()? this:other;
+        }
+        return this.getWallClockTime() > other.getWallClockTime()?this:other;
+    }
+
+    public long getWallClockTime() {
+        return wallClockTime;
+    }
+
+    public HybridTimestamp addTicks(int ticks) {
+        return new HybridTimestamp(wallClockTime, this.ticks + ticks);
+    }
+
+    public int getTicks() {
+        return ticks;
+    }
+
+    @Override
+    public int compareTo(HybridTimestamp other) {
+        if (this.wallClockTime == other.wallClockTime) {
+            return Integer.compare(this.ticks, other.ticks);
+        }
+        return Long.compare(this.wallClockTime, other.wallClockTime);
+    }
+
+}
+```
 
 ## 幂等接收者（Idempotent Receiver）
 
