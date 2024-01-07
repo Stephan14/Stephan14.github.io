@@ -474,6 +474,49 @@ private long timeElaspedSince(long now, long lastLogEntryTimestamp) {
 通过单一通道发送请求，可能会带来一个问题，也就是队首阻塞（Head-of-line blocking，HOL）问题。为了避免这个问题，我们可以使用请求管道（Request Pipeline）。
 
 
+## 请求管道（Request Pipeline）
+
+### 问题
+
+在集群里服务器间使用单一 Socket 通道（Single Socket Channel）进行通信，如果一个请求需要等到之前请求对应应答的返回，这种做法可能会导致性能问题。为了达到更好的吞吐和延迟，服务端的请求队列应该充分填满，确保服务器容量得到完全地利用。比如，当服务器端使用了单一更新队列（Singular Update Queue），只要队列未填满，就可以继续接收更多的请求。如果只是一次只发一个请求，大多数服务器容量就毫无必要地浪费了。
+
+### 解决方案
+
+节点向另外的节点发送请求，无需等待之前请求的应答。只要创建两个单独的线程就可以做到，一个在网络通道上发送请求，一个从网络通道上接受应答（启动一个单独的线程用以读取应答）。
+
+- 如果无需等待应答，请求持续发送，接收请求的节点就可能会不堪重负。有鉴于此，一般会有一个上限，也就是一次可以有多少在途请求。任何一个节点都可以发送最大数量的请求给其它节点。一旦发出且未收到应答的请求数量达到最大值，再发送请求就不能再接收了，发送者就要阻塞住了。限制最大在途请求，一个非常简单的策略就是，用一个阻塞队列来跟踪请求。队列可以用可接受的最大在途请求数量进行初始化。一旦接收到一个请求的应答，就从队列中把它移除，为更多的请求创造空间。
+
+- 处理失败，以及要维护顺序的保证，这些都会让实现变得比较诡异。比如，有两个在途请求。第一个请求失败，然后，重试了，服务器在重试的第一个请求到达服务器之前，已经把第二个请求处理了。服务器需要有一些机制，确保拒绝掉乱序的请求。否则，如果有失败和重试的情况，就会存在消息重排序的风险。
+
+```
+class RequestLimitingPipelinedConnection{
+  private final Map<InetAddressAndPort, ArrayBlockingQueue<RequestOrResponse>> inflightRequests = new ConcurrentHashMap<>();
+  private int maxInflightRequests = 5;
+
+  public void send(InetAddressAndPort to, RequestOrResponse request) throws InterruptedException {
+      ArrayBlockingQueue<RequestOrResponse> requestsForAddress = inflightRequests.get(to);
+      if (requestsForAddress == null) {
+          requestsForAddress = new ArrayBlockingQueue<>(maxInflightRequests);
+          inflightRequests.put(to, requestsForAddress);
+      }
+      requestsForAddress.put(request);
+  }
+
+
+  private void consume(SocketRequestOrResponse response) {
+      Integer correlationId = response.getRequest().getCorrelationId();
+      Queue<RequestOrResponse> requestsForAddress = inflightRequests.get(response.getAddress());
+      RequestOrResponse first = requestsForAddress.peek();
+      if (correlationId != first.getCorrelationId()) {
+          throw new RuntimeException("First response should be for the first request");
+      }
+      requestsForAddress.remove(first);
+      responseConsumer.accept(response.getRequest());
+  }
+}
+```
+
+
 
 
 ## 参考资料
