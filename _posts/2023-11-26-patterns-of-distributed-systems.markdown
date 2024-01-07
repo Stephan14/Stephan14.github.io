@@ -461,7 +461,17 @@ private long timeElaspedSince(long now, long lastLogEntryTimestamp) {
 
 ```
 
+## 单一 Socket 通道（Single Socket Channel）
 
+### 问题
+使用领导者和追随者（Leader and Followers）时，我们需要确保在领导者和各个追随者之间的消息保持有序，如果有消息丢失，需要重试机制。
+
+### 解决方案
+幸运的是，已经长期广泛使用的 TCP 机制已经提供了所有这些必要的特征。因此，我们只要确保追随者与其领导者之间都是通过单一的 Socket 通道进行通信，就可以进行我们所需的通信。然后，追随者再对来自领导者的更新进行序列化，将其送入单一更新队列（Singular Update Queue）。
+
+> 有一点很重要，就是连接要有超时时间，这样就不会在出错的时候，造成永久阻塞了。我们使用心跳（HeartBeat）周期性地在 Socket 通道上发送请求，以便保活。超时时间通常都是多个心跳的间隔，这样，网络的往返时间以及可能的一些延迟就不会造成问题了
+
+通过单一通道发送请求，可能会带来一个问题，也就是队首阻塞（Head-of-line blocking，HOL）问题。为了避免这个问题，我们可以使用请求管道（Request Pipeline）。
 
 
 
