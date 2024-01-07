@@ -615,5 +615,20 @@ public class SingularUpdateQueue<Req, Res> extends Thread implements Logging {
 #### 其它考量
 - 任务链
 - 调用外部的服务
+
+
+## 分段日志(Segmented Log)
+
+### 问题
+
+当在启动时读日志的时候，单个日志文件随着时间会越来越大，成为性能瓶颈。旧日志要定时清理，要在单个大日志文件中清楚处理是非常困难的。
+
+### 解决方案
+
+使用日志分段，这里需要有个容易的方式来将日志逻辑偏移（或者日志序列号）映射到日志分段文件。下面两种方式可以实现：
+
+- 通过相同的前缀和偏移量（或是日志序列号）生成每个分段日志名称
+- 每个日志序列号分隔为两个部分，文件的文件和事务偏移量
+
 ## 参考资料
 https://github.com/pwcrab/Patterns-of-Distributed-Systems/tree/master
