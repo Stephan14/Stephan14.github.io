@@ -329,6 +329,88 @@ public void write() {
 
 暂停之后，重新启动或是重新加入集群，服务器都会先去寻找新的领导者。然后，它会显式地查询当前的高水位标记，将日志截断至高水位标记，然后，从领导者那里获取超过高水位标记的所有条目。类似 RAFT 之类的复制算法有一些方式找出冲突项，比如，查看自己日志里的日志条目，对比请求里的日志条目。如果日志条目拥有相同的索引，但时代时钟（Generation Clock）更低的话，就删除这些条目
 
+## 租约（Lease）
+
+### 问题
+
+集群节点需要对特定的资源进行排他性访问。但是，节点可能会崩溃；他们会临时失联，经历进程暂停。在这些出错的场景下，它们不应该无限地保持对资源的访问。
+
+### 解决方案
+
+- 集群节点可以申请一个有时间限制的租约，超过时间就过期。
+- 拥有租约的节点负责定期刷新它。心跳（HeartBeat）就是客户端用来更新在一致性内核中的存活时间值的。
+- 用一致性内核（Consistent Core）实现租约机制，租约可以在领导者和追随者（Leader and Followers）之间复制，以提供兼容性和一致性。
+- 一致性内核（Consistent Core）中的所有节点都可以创建租约，但只有领导者要追踪租约的超时时间。一致性内核的追随者不用追踪超时时间，这么做是因为领导者要用自己的单调时钟决定租约何时过期。
+- 当既有的领导者失效了，一致性内核（Consistent Core）会选出一个新的领导者。一旦当选，新的领导者就要开始追踪租约。新的领导者会刷新它所知道的所有租约。请注意，原有领导者上即将过期的租约会延长一个“存活时间”的值。
+
+```
+class LeaderLeaseTracker{
+
+  private ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(1);
+  private ScheduledFuture<?> scheduledTask;
+  private Map<String, Lease> leases;
+
+  @Override
+  public void start() {
+      scheduledTask = executor.scheduleWithFixedDelay(this::checkAndExpireLeases,
+              leaseCheckingInterval,
+              leaseCheckingInterval,
+              TimeUnit.MILLISECONDS);
+  }
+
+  @Override
+  public void checkAndExpireLeases() {
+      remove(expiredLeases());
+  }
+
+  private void remove(Stream<String> expiredLeases) {
+      expiredLeases.forEach((leaseId)->{
+          //remove it from this server so that it doesnt cause trigger again.
+          expireLease(leaseId);
+          //submit a request so that followers know about expired leases
+          submitExpireLeaseRequest(leaseId);
+      });
+  }
+
+  private Stream<String> expiredLeases() {
+      long now = System.nanoTime();
+      Map<String, Lease> leases = kvStore.getLeases();
+      return  leases.keySet().stream()
+              .filter(leaseId -> {
+          Lease lease = leases.get(leaseId);
+          return lease.getExpiresAt() < now;
+      });
+  }
+
+  @Override
+  public void addLease(String name, long ttl) throws DuplicateLeaseException {
+      //有一点需要注意，在哪里验证租约注册是否重复。在提出请求之前检查是不够的，因为可能会存在多个在途请求。因此，服务器要在成功复制之后，它还要检查租约注册是否重复。
+      if (leases.get(name) != null) {
+          throw new DuplicateLeaseException(name);
+      }
+      Lease lease = new Lease(name, ttl, clock.nanoTime());
+      leases.put(name, lease);
+  }
+
+
+  @Override
+  public void refreshLease(String name) {
+      //租约时间过半时发送请求。这样一来，在租约时间内，最多发送两次刷新请求。客户端节点可以用自己的单调时钟来跟踪时间。
+      Lease lease = leases.get(name);
+      lease.refresh(clock.nanoTime());
+  }
+
+
+  public void expireLease(String name) {
+      getLogger().info("Expiring lease " + name);
+      Lease removedLease = leases.remove(name);
+      removeAttachedKeys(removedLease);
+  }
+
+}
+```
+
+
 
 
 
