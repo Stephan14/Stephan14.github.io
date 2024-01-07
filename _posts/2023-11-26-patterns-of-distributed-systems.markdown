@@ -410,9 +410,61 @@ class LeaderLeaseTracker{
 }
 ```
 
+## 低水位标记（Low-Water Mark）
+
+### 问题
+预写日志维护着持久化存储的每一次更新。随着时间的推移，它会无限增长。使用分段日志，一次可以处理更小的文件，但如果不检查，磁盘总存储量会无限增长。
+
+### 解决方案
+
+#### 基于快照的低水位标记
+
+存储引擎会周期地打快照，已经成功应用的日志索引也要和快照一起存起来，快照一旦持久化到磁盘上，日志管理器就会得到低水位标记，之后，就可以丢弃旧的日志了。
+```
+public SnapShot takeSnapshot() {
+    Long snapShotTakenAtLogIndex = wal.getLastLogEntryId();
+    return new SnapShot(serializeState(kv), snapShotTakenAtLogIndex);
+}
+
+List<WALSegment> getSegmentsBefore(Long snapshotIndex) {
+    List<WALSegment> markedForDeletion = new ArrayList<>();
+    List<WALSegment> sortedSavedSegments = wal.sortedSavedSegments;
+    for (WALSegment sortedSavedSegment : sortedSavedSegments) {
+        if (sortedSavedSegment.getLastLogEntryId() < snapshotIndex) {
+            markedForDeletion.add(sortedSavedSegment);
+        }
+    }
+    return markedForDeletion;
+}
+
+```
+
+#### 基于时间的低水位标记
+
+```
+private List<WALSegment> getSegmentsPast(Long logMaxDurationMs) {
+    long now = System.currentTimeMillis();
+    List<WALSegment> markedForDeletion = new ArrayList<>();
+    List<WALSegment> sortedSavedSegments = wal.sortedSavedSegments;
+    for (WALSegment sortedSavedSegment : sortedSavedSegments) {
+        if (timeElaspedSince(now, sortedSavedSegment.getLastLogEntryTimestamp()) > logMaxDurationMs) {
+            markedForDeletion.add(sortedSavedSegment);
+        }
+    }
+    return markedForDeletion;
+}
+
+private long timeElaspedSince(long now, long lastLogEntryTimestamp) {
+    return now - lastLogEntryTimestamp;
+}
+
+
+```
+
+
 
 
 
 
 ## 参考资料
-https://github.com/dreamhead/patterns-of-distributed-systems/tree/master
+https://github.com/pwcrab/Patterns-of-Distributed-Systems/tree/master
