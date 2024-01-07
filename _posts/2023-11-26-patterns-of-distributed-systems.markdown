@@ -516,8 +516,104 @@ class RequestLimitingPipelinedConnection{
 }
 ```
 
+## 单一更新队列（Singular Update Queue）
+
+### 问题
+
+有多个并发客户端对状态进行更新时，我们需要一次进行一个变化，这样才能保证安全地进行更新。考虑一下预写日志（Write-Ahead Log）模式。即便有多个并发的客户端在尝试写入，我们也要一次处理一项。通常来说，对于并发修改，常用的方式是使用锁。但是如果待执行的任务比较耗时，比如，写入一个文件，那阻塞其它调用线程，直到任务完成，这种做法可能会给这个系统的吞吐和延迟带来严重的影响。在维护一次处理一个的这种执行的保障时，有效利用计算资源是极其重要的。
+
+### 解决方案
+
+实现一个工作队列，以及一个工作在这个队列上的单一线程。多个并发客户端可以将状态变化提交到这个队列中。但是，只有一个线程负责状态的改变。
 
 
+```
+class RequestWrapper<Req, Res> {
+    private final CompletableFuture<Res> future;
+    private final Req request;
 
+    public RequestWrapper(Req request) {
+        this.request = request;
+        this.future = new CompletableFuture<Res>();
+    }
+
+    public CompletableFuture<Res> getFuture() { return future; }
+    public Req getRequest()                   { return request; }
+
+    public void complete(Res response) {
+      future.complete(response);
+    }
+
+    public void completeExceptionally(Exception e) {
+      e.printStackTrace();
+      getFuture().completeExceptionally(e);
+    }
+}
+
+
+public class SingularUpdateQueue<Req, Res> extends Thread implements Logging {
+    private ArrayBlockingQueue<RequestWrapper<Req, Res>> workQueue
+            = new ArrayBlockingQueue<RequestWrapper<Req, Res>>(100);
+    private Function<Req, Res> handler;
+    private volatile boolean isRunning = false;
+    
+    public CompletableFuture<Res> submit(Req request) {
+      try {
+          var requestWrapper = new RequestWrapper<Req, Res>(request);
+          workQueue.put(requestWrapper);
+          return requestWrapper.getFuture();
+      }
+      catch (InterruptedException e) {
+          throw new RuntimeException(e);
+      }
+    }
+    
+    @Override
+    public void run() {
+      isRunning = true;
+      while(isRunning) {
+          Optional<RequestWrapper<Req, Res>> item = take();
+          item.ifPresent(requestWrapper -> {
+              try {
+                  Res response = handler.apply(requestWrapper.getRequest());
+                  requestWrapper.complete(response);
+              } catch (Exception e) {
+                  requestWrapper.completeExceptionally(e);
+              }
+          });
+      }
+    }
+
+    private Optional<RequestWrapper<Req, Res>> take() {
+      try {
+          return Optional.ofNullable(workQueue.poll(300, TimeUnit.MILLISECONDS));
+      } catch (InterruptedException e) {
+          return Optional.empty();
+      }
+    }
+
+    public void shutdown() {
+      this.isRunning = false;
+    }
+}
+
+```
+
+#### 队列的选择
+- ArrayBlockingQueue（Kafka 请求队列使用）
+正如其名字所示，这是一个以数组为后端的阻塞队列。当需要创建一个固定有界的队列时，就可以使用它。一旦队列填满，生产端就阻塞。它提供了阻塞的背压方式，如果消费者慢和生产者快，它就是适用的。
+
+- LinkedBlockingDeque（Zookeeper 和 Kafka 应答队列使用）
+如果不阻塞生产者，而且需要的是一个无界队列，它是最有用的。选择它，我们需要谨慎，因为如果没有实现背压技术，队列可能会很快填满，持续地消耗掉所有的内存。
+
+- RingBuffer（LMAX Disruptor 使用）
+正如 LMAX Disruptor 所讨论的，有时，任务处理是延迟敏感的。如果使用 ArrayBlockingQueue 在不同的处理阶段复制任务，延迟会增加，在一些情况下，这是无法接受的。在这些情况下，就可以使用 RingBuffer 在不同的阶段之间传递任务。
+
+#### 背压
+工作队列用于在线程间通信，所以，背压是一个重要的关注点。如果消费者很慢，而生产者很快，队列就可能很快填满。除非采用了一些预防措施，否则，如果大量的任务填满队列，内存就会耗光。通常来说，队列是有界的，如果队列满了，发送者就会阻塞。
+
+#### 其它考量
+- 任务链
+- 调用外部的服务
 ## 参考资料
 https://github.com/pwcrab/Patterns-of-Distributed-Systems/tree/master
