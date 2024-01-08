@@ -630,5 +630,156 @@ public class SingularUpdateQueue<Req, Res> extends Thread implements Logging {
 - 通过相同的前缀和偏移量（或是日志序列号）生成每个分段日志名称
 - 每个日志序列号分隔为两个部分，文件的文件和事务偏移量
 
+
+## 状态监控（State Watch）
+
+### 问题
+
+客户端会对服务器上特定值的变化感兴趣。如果客户端要持续不断地轮询服务器，查看变化，它们就很难构建自己的逻辑。如果客户端与服务器之间打开许多连接，监控变化，服务器会不堪重负。
+
+
+### 解决方案
+
+让客户端将自己感兴趣的特定状态变化注册到服务器上。状态发生变化时，服务器会通知感兴趣的客户端。客户端同服务器之间维护了一个单一 Socket 通道（Single Socket Channel）。服务器通过这个通道发送状态变化通知。客户端可能会对多个值感兴趣，如果每个监控都维护一个连接的话，服务器将不堪重负。因此，客户端需要使用请求管道（Request Pipeline）。
+
+#### 客户端实现
+
+```
+ConcurrentHashMap<String, Consumer<WatchEvent>> watches = new ConcurrentHashMap<>();
+
+public void watch(String key, Consumer<WatchEvent> consumer) {
+    watches.put(key, consumer);
+    sendWatchRequest(key);
+}
+
+private void sendWatchRequest(String key) {
+    requestSendingQueue.submit(new RequestOrResponse(RequestId.WatchRequest.getId(),
+            JsonSerDes.serialize(new WatchRequest(key)),
+            correlationId.getAndIncrement()));
+}
+
+this.pipelinedConnection = new PipelinedConnection(address, requestTimeoutMs, (r) -> {
+    logger.info("Received response on the pipelined connection " + r);
+    if (r.getRequestId() == RequestId.WatchRequest.getId()) {
+        WatchEvent watchEvent = JsonSerDes.deserialize(r.getMessageBodyJson(), WatchEvent.class);
+        Consumer<WatchEvent> watchEventConsumer = getConsumer(watchEvent.getKey());
+        watchEventConsumer.accept(watchEvent);
+        lastWatchedEventIndex = watchEvent.getIndex(); //capture last watched index, in case of connection failure.
+    }
+    completeRequestFutures(r);
+});
+
+```
+
+
+#### 服务端实现
+
+```
+private Map<String, ClientConnection> watches = new HashMap<>();
+private Map<ClientConnection, List<String>> connection2WatchKeys = new HashMap<>(); //删除conntion时方便查找对应的路径
+
+public void watch(String key, ClientConnection clientConnection) {
+    logger.info("Setting watch for " + key);
+    addWatch(key, clientConnection);
+}
+
+private synchronized void addWatch(String key, ClientConnection clientConnection) {
+    mapWatchKey2Connection(key, clientConnection);
+    watches.put(key, clientConnection);
+}
+
+private void mapWatchKey2Connection(String key, ClientConnection clientConnection) {
+    List<String> keys = connection2WatchKeys.get(clientConnection);
+    if (keys == null) {
+        keys = new ArrayList<>();
+        connection2WatchKeys.put(clientConnection, keys);
+    }
+    keys.add(key);
+}
+
+public void close(ClientConnection connection) {
+    removeWatches(connection);
+}
+
+private synchronized void removeWatches(ClientConnection clientConnection) {
+    List<String> watchedKeys = connection2WatchKeys.remove(clientConnection);
+    if (watchedKeys == null) {
+        return;
+    }
+    for (String key : watchedKeys) {
+        watches.remove(key);
+    }
+}
+
+private synchronized void notifyWatchers(SetValueCommand setValueCommand, Long entryId) {
+    if (!hasWatchesFor(setValueCommand.getKey())) {
+        return;
+    }
+    String watchedKey = setValueCommand.getKey();
+    WatchEvent watchEvent = new WatchEvent(watchedKey,
+                                setValueCommand.getValue(),
+                                EventType.KEY_ADDED, entryId);
+    notify(watchEvent, watchedKey);
+}
+
+private void notify(WatchEvent watchEvent, String watchedKey) {
+    List<ClientConnection> watches = getAllWatchersFor(watchedKey);
+    for (ClientConnection pipelinedClientConnection : watches) {
+        try {
+            String serializedEvent = JsonSerDes.serialize(watchEvent);
+            getLogger().trace("Notifying watcher of event "
+                    + watchEvent +
+                    " from "
+                    + server.getServerId());
+            pipelinedClientConnection
+                    .write(new RequestOrResponse(RequestId.WatchRequest.getId(),
+                            serializedEvent));
+        } catch (NetworkException e) {
+            removeWatches(pipelinedClientConnection); //remove watch if network connection fails.
+        }
+    }
+}
+
+```
+
+#### 分级监听
+
+能在父节点或键的前缀设置监听。任何变化都是触发在父节点上的子节点的监听。对于每个事件，一致性核心要遍历路径检查如果这些在父路径上设置了监听，就要给这些监听发送事件。
+
+```
+List<ClientConnection> getAllWatchersFor(String key) {
+    List<ClientConnection> affectedWatches = new ArrayList<>();
+    String[] paths = key.split("/");
+    String currentPath = paths[0];
+    addWatch(currentPath, affectedWatches);
+    for (int i = 1; i < paths.length; i++) {
+        currentPath = currentPath + "/" + paths[i];
+        addWatch(currentPath, affectedWatches);
+    }
+    return affectedWatches;
+}
+
+private void addWatch(String currentPath, List<ClientConnection> affectedWatches) {
+    ClientConnection clientConnection = watches.get(currentPath);
+    if (clientConnection != null) {
+        affectedWatches.add(clientConnection);
+    }
+}
+```
+因为要调用的函数映射存储在键前缀中，它要遍历所有层来查找这个函数给接收到事件的客户端调用是很重要的。另一种方法是将事件触发的路径与事件一起发送，这样客户端就知道是哪个监听事件被发送。
+
+#### 处理连接异常
+客户端需要告诉服务器它最近接受到的事件，客户端当重启监听的时候就会发送最近接受到的事件号。服务器会预期的发送它从该事件号开始记录的所有事件。
+
+#### 从键值存储派生事件
+
+当客户端重新建立对服务器的连接，它能再次设置监听并且发送最近的变更编号。服务器就会将它与存储的值比较，如果它比客户端发送的要大，它就会重新发送事件给客户端。从键值存储区派生事件可能有点尴尬，因为需要猜测事件。它可能会丢失一些事件。举个例子，如果这个键被创建然后删除，正当这个时候客户端断开连接了，那么这个创建的事件就会丢失。
+
+zookeeper 里的监听默认是一次性的。一旦事件被触发，客户端需要再次设置监听，如果它们想要一起接收事件的话。在再次设置监听之前会有一些事件会丢失，所以客户端需要确保读取他们最近的状态，以至他们不会丢失任何更新。
+
+#### 存储历史事件
+保留过去事件的历史记录以及从事件历史中回复客户端是很容易的。使用这个方法的问题是事件历史需要限制，比如 1000 个事件。如果客户端长时间断开连接，它可能丢失超过 1000 个事件窗口的事件。
+
+
 ## 参考资料
 https://github.com/pwcrab/Patterns-of-Distributed-Systems/tree/master
