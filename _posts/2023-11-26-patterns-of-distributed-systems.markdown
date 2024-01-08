@@ -9,6 +9,8 @@ tags:
     - 分布式系统
 ---
 
+![总结](https://res.cloudinary.com/bytedance14/image/upload/v1704687313/1603874265.png)
+
 ## 一致性内核（Consistent Core）
 
 ### 问题
