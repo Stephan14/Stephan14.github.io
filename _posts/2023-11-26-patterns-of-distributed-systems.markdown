@@ -792,5 +792,102 @@ zookeeper 里的监听默认是一次性的。一旦事件被触发，客户端�
 ### 解决方案
 存储每个状态作为命令以文件的形式存储在硬盘中。为按顺序追加的每个服务器进程维护一个日志。单个日志它是有序追加的，它简化了在重启和随后的在线操作的日志处理（当日志以新命令追加时）。每个日志条目都给定一个唯一标识符。这个唯一的日志标识有助于在一些其它日志像分段日志操作或使用低水位线标记的日志清除。日志更新能通过使用单更新队列实现。
 
+
+## 版本值(Versioned Value)
+
+### 问题
+分布式系统中，节点需要能够知道键的哪个值是最新的。有时他们需要知道过去的值，以便能够正确地对值的变化作出反应。
+
+### 解决方案
+
+为每个值都存储一个版本值。这个版本编号在每次更新的时候自增。**它允许每次更新都转换为新的写操作，而不会阻塞读操作**。客户端能通过指定的版本号读取历史值。
+
+```
+class ReplicatedKVStore{
+  int version = 0;
+  MVCCStore mvccStore = new MVCCStore();
+  
+  @ovveride
+  public CompletableFuture<Response> put(String key, String value) {
+      return server.propose(new SetValueCommand(key, value));
+  }
+  
+  private Response applySetValueCommand(SetValueCommand setValueCommand) {
+  	  getLogger().info("Setting key value " + setValueCommand);
+  	  version = version + 1;
+      mvccStore.put(new VersionedKey(setValueCommand.getKey(), version), setValueCommand.getValue());
+      Response response = Response.success(version);
+      return response;
+  }
+};
+```
+写流程
+
+![写流程](https://res.cloudinary.com/bytedance14/image/upload/v1705224501/versioned-value-logical-clock-put.svg)
+
+读流程
+
+![读流程](https://res.cloudinary.com/bytedance14/image/upload/v1705224501/versioned-value-logical-clock-get.svg)
+
+#### 多个版本读
+
+```
+class IndexedMVCCStore{
+  public class IndexedMVCCStore {
+      NavigableMap<String, List<Integer>> keyVersionIndex = new TreeMap<>();
+      NavigableMap<VersionedKey, String> kv = new TreeMap<>();
+  
+      ReadWriteLock rwLock = new ReentrantReadWriteLock();
+      int version = 0;
+      
+      public int put(String key, String value) {
+          rwLock.writeLock().lock();
+          try {
+              version = version + 1;
+              kv.put(new VersionedKey(key, version), value);
+  
+              updateVersionIndex(key, version);
+  
+              return version;
+          } finally {
+              rwLock.writeLock().unlock();
+          }
+      }
+      
+      private void updateVersionIndex(String key, int newVersion) {
+          List<Integer> versions = getVersions(key);
+          versions.add(newVersion);
+          keyVersionIndex.put(key, versions);
+      }
+      
+      private List<Integer> getVersions(String key) {
+          List<Integer> versions = keyVersionIndex.get(key);
+          if (versions == null) {
+              versions = new ArrayList<>();
+              keyVersionIndex.put(key, versions);
+          }
+          return versions;
+      }
+  }
+
+  public List<String> getRange(String key, final int fromRevision, int toRevision) {
+  	  rwLock.readLock().lock();
+      try {
+          List<Integer> versions = keyVersionIndex.get(key);
+          Integer maxRevisionForKey = versions.stream().max(Integer::compareTo).get();
+          Integer revisionToRead = maxRevisionForKey > toRevision ? toRevision : maxRevisionForKey;
+          SortedMap<VersionedKey, String> versionMap = kv.subMap(new VersionedKey(key, revisionToRead), new VersionedKey(key, toRevision));
+          getLogger().info("Available version keys " + versionMap + ". Reading@" + fromRevision + ":" + toRevision);
+          return new ArrayList<>(versionMap.values());
+          
+      } finally {
+          rwLock.readLock().unlock();
+      }
+  } 
+}
+```
+
+
+
 ## 参考资料
 https://github.com/pwcrab/Patterns-of-Distributed-Systems/tree/master
