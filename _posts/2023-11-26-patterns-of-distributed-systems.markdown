@@ -887,7 +887,236 @@ class IndexedMVCCStore{
 }
 ```
 
+## 版本向量（Version Vector）
 
+### 问题
+如果多服务器允许更新相同的 key，那么在跨多个副本之间的并发更新值的操作检测是非常重要的。
+
+### 解决方案
+
+每个键都是通过版本向量关联的，它负责维护每个集群节点一个数字。本质上，版本向量是一组计数器，每个节点一个。三个节点（蓝、绿、黑）的版本向量看起来应该是 [blue: 43, green: 54, black: 12]。每当一个节点进行内部更新时，它就会更新自己的计数器，所以 green 节点中的更新会将向量更改为 [blue:43，green:55，black:12]。无论两个节点何时通信，它们都会同步它们的矢量戳(vector stamps)，从而让它们能检测同一个时刻的任何更新。
+
+```
+class VersionVector{ 
+  private final TreeMap<String, Long> versions;
+
+  public VersionVector() {
+      this(new TreeMap<>());
+  }
+
+  public VersionVector(TreeMap<String, Long> versions) {
+      this.versions = versions;
+  }
+
+  public VersionVector increment(String nodeId) {
+      TreeMap<String, Long> versions = new TreeMap<>();
+      versions.putAll(this.versions);
+      Long version = versions.get(nodeId);
+      if(version == null) {
+          version = 1L;
+      } else {
+          version = version + 1L;
+      }
+      versions.put(nodeId, version);
+      return new VersionVector(versions);
+  }
+}
+```
+
+#### 比较版本向量
+
+通过比较每个节点的版本号来比较版本向量。如果两个版本向量都具有相同集群节点的版本号，并且每个版本号都高于另一个向量中的版本号，则认为这个版本向量高于另一个，反之亦然。如果两个向量的版本号都不高，或者它们的版本号适用于不同的集群节点，则认为它们是并发的
+```
+public enum Ordering {
+    Before,
+    After,
+    Concurrent
+}
+
+class VersionVector{ 
+  // 这段代码是 Voldermort 的 VectorClock 比较实现
+  // https://github.com/voldemort/voldemort/blob/master/src/java/voldemort/versioning/VectorClockUtils.java
+  public static Ordering compare(VersionVector v1, VersionVector v2) {
+      if(v1 == null || v2 == null)
+          throw new IllegalArgumentException("Can't compare null vector clocks!");
+      // We do two checks: v1 <= v2 and v2 <= v1 if both are true then
+      // 检查两项：v1 <= v2 和 v2 <= v1，两个都为真
+      boolean v1Bigger = false;
+      boolean v2Bigger = false;
+
+      SortedSet<String> v1Nodes = v1.getVersions().navigableKeySet();
+      SortedSet<String> v2Nodes = v2.getVersions().navigableKeySet();
+      // 取 v1，v2 节点交集
+      SortedSet<String> commonNodes = getCommonNodes(v1Nodes, v2Nodes);
+
+      // 如果 v1 的节点要比共同的节点多
+      // 即 v1 有 v2 没有的时钟
+      if(v1Nodes.size() > commonNodes.size()) {
+          v1Bigger = true;
+      }
+      // 如果 v2 的节点要比共同的节点多
+      // 即 v2 有 v1 没有的时钟
+      if(v2Nodes.size() > commonNodes.size()) {
+          v2Bigger = true;
+      }
+      // 比较相同的部分
+      for(String nodeId: commonNodes) {
+          // no need to compare more
+          if(v1Bigger && v2Bigger) {
+              break;
+          }
+          long v1Version = v1.getVersions().get(nodeId);
+          long v2Version = v2.getVersions().get(nodeId);
+          if(v1Version > v2Version) {
+              v1Bigger = true;
+          } else if(v1Version < v2Version) {
+              v2Bigger = true;
+          }
+      }
+
+      /*
+       * 这是它们相等的情况. 有意识的返回 BEFORE, 
+       * 这样我们将返回一个 ObsoleteVersionException，用于使用相同的时钟进行在线写操作。
+       */
+      if(!v1Bigger && !v2Bigger)
+          return Ordering.Before;
+          /* 这种情况下，v1 是 v2 的后继时钟（successor clock） */
+      else if(v1Bigger && !v2Bigger)
+          return Ordering.After;
+          /* 这种情况下，v2 是 v1 的后继时钟（successor clock） */
+      else if(!v1Bigger && v2Bigger)
+          return Ordering.Before;
+          /* 这是两个时钟并行的情况 */
+      else
+          return Ordering.Concurrent;
+  }
+
+  private static SortedSet<String> getCommonNodes(SortedSet<String> v1Nodes, SortedSet<String> v2Nodes) {
+      // 获取 v1 v2 都有的时钟 clocks(nodesIds) 集合
+      SortedSet<String> commonNodes = Sets.newTreeSet(v1Nodes);
+      commonNodes.retainAll(v2Nodes);
+      return commonNodes;
+  }
+
+
+  public boolean descents(VersionVector other) {
+      return other.compareTo(this) == Ordering.Before;
+  }
+}
+```
+
+#### 在键值存储中使用版本向量
+
+![流程](https://res.cloudinary.com/bytedance14/image/upload/v1705226689/versioned-vector-put.svg)
+在无leader复制方案中，客户端或协调器节点选择该节点并基于该键写入数据。版本向量基于 key 映射到的主集群节点进行更新。将具有相同版本向量的值复制到其他集群节点上进行复制。如果映射到 key 的群集节点不可用，则选择下一个节点。**版本向量只对保存该值的第一个集群节点递增(主要行为就是自增版本号),所有其他节点保存数据副本。**
+
+![并发](https://res.cloudinary.com/bytedance14/image/upload/v1705226986/vector-clock-concurrent-updates.svg)
+从上图可以看出，不同的客户端可以在不同的节点上更新相同的 key，例如当客户端无法到达特定的节点时。这就产生了一种情况，不同的节点有不同的值，这些值根据它们的版本向量被认为是“并发的”。因此，当版本被认为是并发的时候，基于版本向量的存储为任何 key 保留多个版本。
+
+```
+class VersionVectorKVStore{
+  public void put(String key, VersionedValue newValue) {
+      List<VersionedValue> existingValues = kv.get(key);
+      if (existingValues == null) {
+          existingValues = new ArrayList<>();
+      }
+
+      rejectIfOldWrite(key, newValue, existingValues);
+      List<VersionedValue> newValues = merge(newValue, existingValues);
+      kv.put(key, newValues);
+  }
+
+  //如果 newValue 要比已存在的版本值旧则拒绝
+  private void rejectIfOldWrite(String key, VersionedValue newValue, List<VersionedValue> existingValues) {
+      for (VersionedValue existingValue : existingValues) {
+          if (existingValue.descendsVersion(newValue)) {
+              throw new ObsoleteVersionException("Obsolete version for key '" + key
+                      + "': " + newValue.versionVector);
+          }
+      }
+  }
+  
+  //将 newValue 与现有值合并。删除版本低于 newValue 的值。
+  //如果已存在的值既不在 newValue 之前也不在 newValue 之后(并发)。它会被保留下来
+  private List<VersionedValue> merge(VersionedValue newValue, List<VersionedValue> existingValues) {
+      List<VersionedValue> retainedValues = removeOlderVersions(newValue, existingValues);
+      retainedValues.add(newValue);
+      return retainedValues;
+  }
+
+  private List<VersionedValue> removeOlderVersions(VersionedValue newValue, List<VersionedValue> existingValues) {
+      List<VersionedValue> retainedValues = existingValues
+              .stream()
+              .filter(v -> !newValue.descendsVersion(v)) //保留不直接由newValue控制(dominated)的版本
+              .collect(Collectors.toList());
+      return retainedValues;
+  }
+}
+
+```
+
+##### 解决冲突
+
+如果从不同的副本返回多个版本，则能通过向量时钟比较可以检测到最新的值。
+```
+class ClusterClient{
+  public List<VersionedValue> get(String key) {
+      List<Integer> allReplicas = findReplicas(key);
+
+      List<VersionedValue> allValues = new ArrayList<>();
+      for (Integer index : allReplicas) {
+          ClusterNode clusterNode = clusterNodes.get(index);
+          List<VersionedValue> nodeVersions = clusterNode.get(key);
+
+          allValues.addAll(nodeVersions);
+      }
+
+      return latestValuesAcrossReplicas(allValues);
+  }
+
+  private List<VersionedValue> latestValuesAcrossReplicas(List<VersionedValue> allValues) {
+      List<VersionedValue> uniqueValues = removeDuplicates(allValues);
+      return retainOnlyLatestValues(uniqueValues);
+  }
+
+  private List<VersionedValue> retainOnlyLatestValues(List<VersionedValue> versionedValues) {
+      for (int i = 0; i < versionedValues.size(); i++) {
+          VersionedValue v1 = versionedValues.get(i);
+          versionedValues.removeAll(getPredecessors(v1, versionedValues));
+      }
+      return versionedValues;
+  }
+
+  private List<VersionedValue> getPredecessors(VersionedValue v1, List<VersionedValue> versionedValues) {
+      List<VersionedValue> predecessors = new ArrayList<>();
+      for (VersionedValue v2 : versionedValues) {
+          if (!v1.sameVersion(v2) && v1.descendsVersion(v2)) {
+              predecessors.add(v2);
+          }
+      }
+      return predecessors;
+  }
+
+  private List<VersionedValue> removeDuplicates(List<VersionedValue> allValues) {
+      return allValues.stream().distinct().collect(Collectors.toList());
+  }
+}
+```
+当有并发更新时，仅仅基于版本向量进行冲突解决是不够的。因此，允许客户端提供特定于应用程序的冲突解决程序是很重要的。客户端可以在读取值时提供冲突解决程序。
+
+###### 最新写入获胜（Last Write Wins；LWW）解决冲突
+
+对于键值存储有时客户端更喜欢根据时间戳解决冲突，尽管存在跨服务器时间戳的已知问题，但这种方法的简便性使其成为客户机的首选，即使存在由于跨服务器时间戳问题而丢失某些更新的风险（关于时间戳解决冲突的问题详见兰伯特时钟(Lamport Clock)）
+
+##### 读修复
+
+虽然允许任何集群节点接受写请求可以提高可用性，但重要的是最终所有副本都具有相同的数据。常见的修复副本的方法是在客户端读取数据时发生。当冲突解决后，还可以检测哪些节点有较早的版本。具有较旧版本的节点可以从客户端读取请求处理的发送最新版本。这叫做读修复。
+
+![](https://res.cloudinary.com/bytedance14/image/upload/v1705227490/read-repair.svg)
+
+#### 点分版本向量（Dotted version vector）
+
+https://riak.com/posts/technical/vector-clocks-revisited-part-2-dotted-version-vectors/index.html
 
 ## 参考资料
 https://github.com/pwcrab/Patterns-of-Distributed-Systems/tree/master
